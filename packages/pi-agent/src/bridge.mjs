@@ -32,6 +32,20 @@ const ERROR_INVALID_PARAMS = -32602;
 const ERROR_INTERNAL = -32603;
 const SESSION_INDEX_META_LIMIT = 100;
 
+/** ZCode template/provider ids that differ from pi-rs's builtin provider ids. */
+const PI_PROVIDER_ALIASES = {
+  "moonshot-kimi": "moonshotai",
+  "qwen-alibaba-model-studio-cn": "qwen-token-plan-cn",
+  "qwen-alibaba-model-studio-intl": "qwen-token-plan",
+  "xiaomi-mimo": "xiaomi",
+  "opencode-go-chat": "opencode-go",
+  "opencode-go-messages": "opencode-go",
+  "opencode-go-responses": "opencode-go",
+  "opencode-zen-chat": "opencode",
+  "opencode-zen-messages": "opencode",
+  "opencode-zen-responses": "opencode",
+};
+
 export class ProtocolError extends Error {
   constructor(code, message, data) {
     super(message);
@@ -73,6 +87,15 @@ export class WorkspaceBridge {
 
   get piBinary() {
     return this.#env.PI_AGENT_PI_BINARY || "pi-rs";
+  }
+
+  /** Map a ZCode-side provider id to pi-rs's builtin provider id. */
+  toPiProviderId(providerId) {
+    if (!providerId) return providerId;
+    const direct = PI_PROVIDER_ALIASES[providerId];
+    if (direct) return direct;
+    if (piProviders.some((p) => p.id === providerId)) return providerId;
+    return providerId;
   }
 
   log(message) {
@@ -136,7 +159,8 @@ export class WorkspaceBridge {
 
   // ── provider credentials ────────────────────────────────────────────────
 
-  async ensureProviderAuth(providerId, { sessionId, workspace, modelSelection }) {
+  async ensureProviderAuth(zcodeProviderId, { sessionId, workspace, modelSelection }) {
+    const providerId = this.toPiProviderId(zcodeProviderId);
     if (!providerId) return;
     if (this.#providerKeys.has(providerId)) return;
     const auth = readAuthJson(this.#env);

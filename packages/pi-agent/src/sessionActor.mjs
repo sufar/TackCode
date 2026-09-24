@@ -566,7 +566,7 @@ export class SessionActor {
   }
 
   async applyModelSelection(selection, thought, { persistMarker = true } = {}) {
-    const provider = selection.providerId;
+    const provider = this.#bridge.toPiProviderId(selection.providerId);
     const model = selection.modelId;
     const thoughtLevel =
       thought ?? selection.options?.reasoningLevel ?? this.config.thought ?? "off";

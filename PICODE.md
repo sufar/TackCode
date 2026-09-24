@@ -84,9 +84,12 @@ Electron userData、`PI_RS_AGENT_DIR`（pi-rs 的会话/凭据目录），并通
    取回该 provider 的 API Key，写入 `~/.pi-rs/agent/auth.json`（与 `pi-rs login` 同一文件）
    供 pi-rs 使用。
 
-模型 id 对齐注意：UI 侧模型 id 会原样传给 pi-rs 的 `set_model`。pi-rs 内置目录没有的
-模型 id（如 ZCode 模板自带的 `deepseek-flash`）会切换失败并落到错误提示；
-在设置页把模型列表改成 pi-rs 目录里的 id（见 `pi-rs models`）即可。
+模型 id 对齐注意：UI 侧模型 id 会原样传给 pi-rs 的 `set_model`。pi-rs 对内置 provider 的
+未知模型 id 会合成 bare_model（用 provider 默认参数）兜底，所以 ZCode 模板自带的模型
+（如 `deepseek-flash`）也能跑；想要精确的 contextWindow/maxTokens/思考档位，在设置页把
+模型 id 改成 `pi-rs models` 里的值即可。ZCode 与 pi-rs 的 provider id 不一致时 bridge 内置
+别名表（moonshot-kimi→moonshotai、qwen 百炼→qwen-token-plan(-cn)、xiaomi-mimo→xiaomi、
+opencode-go/zen→opencode-go/opencode）。
 
 ## 当前限制（bridge v0.1）
 
