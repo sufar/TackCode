@@ -8,7 +8,9 @@ import {
 export function shouldShowDesktopUpdateEntry(
   flavor: ZCodeProductFlavor = ZCODE_PRODUCT_FLAVOR,
 ): boolean {
-  return flavor === "production";
+  // pi-rs-code: no update feed exists for the fork (see autoUpdater.ts).
+  void flavor;
+  return false;
 }
 
 export function getUpdateMenuLabelId(state: UpdateStatePayload | null) {

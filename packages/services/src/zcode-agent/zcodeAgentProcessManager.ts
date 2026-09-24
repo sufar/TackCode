@@ -446,11 +446,30 @@ export function resolveDefaultZCodeAgentCommand(
     // unless they explicitly provide a preparation entrypoint.
     const storagePreparationEntry =
       process.env.ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY?.trim() || undefined;
+    // Extra env for the spawned agent (e.g. ELECTRON_RUN_AS_NODE when the
+    // command is the Electron binary itself). Plain node ignores it.
+    let extraEnv: Record<string, string> = { ELECTRON_RUN_AS_NODE: "1" };
+    try {
+      const parsed = JSON.parse(process.env.ZCODE_AGENT_SERVER_ENV_JSON ?? "{}") as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        extraEnv = {
+          ...extraEnv,
+          ...Object.fromEntries(
+            Object.entries(parsed as Record<string, unknown>).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string",
+            ),
+          ),
+        };
+      }
+    } catch {
+      throw new Error("ZCODE_AGENT_SERVER_ENV_JSON must be a JSON string map");
+    }
     return applyPresentationSurfaceToCommand(
       {
         command,
         args: parseArgsJson(process.env.ZCODE_AGENT_SERVER_ARGS_JSON) ?? ["app-server", "--stdio"],
         cwd: process.env.ZCODE_AGENT_SERVER_CWD?.trim() || context.workspacePath,
+        env: extraEnv,
         ...(storagePreparationEntry
           ? { supportsStorageStartup: true, storagePreparationEntry }
           : {}),

@@ -34,14 +34,10 @@ export function ProviderTemplatePicker({
   const { intl, locale } = useZCodeIntl();
   const { dismissFeedback, showFeedback } = useProviderDetailFeedback();
   const customLabel = intl.formatMessage({ id: "settings.modelProvider.newProviderName" });
-  const zhipuIds = ["bigmodel-api", "zai-api", "bigmodel-standard-api", "zai-standard-api"];
+  // pi-rs-code: Zhipu templates are stripped from the builtin catalog; keep a
+  // single neutral group (the upstream zhipu group would render empty anyway).
+  const zhipuIds: string[] = [];
   const groups = [
-    {
-      id: "zhipu",
-      templates: zhipuIds.flatMap((id) =>
-        templates.filter((template) => template.templateId === id),
-      ),
-    },
     {
       id: "other",
       templates: templates.filter((template) => !zhipuIds.includes(template.templateId)),

@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- bridge dispatch co-locates the whole host-facing method surface; splitting would scatter protocol handlers from their shared subscription state. */
 // WorkspaceBridge: the ZCode Protocol endpoint. One bridge process serves one
 // workspace (the host spawns one agent process per workspaceKey); it owns the
 // sessions-index / workspace-config topics, routes conversation topics to

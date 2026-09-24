@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- the session projection state machine is one cohesive unit (rows, streaming, commands, snapshot); splitting it would duplicate the shared private state it operates on. */
 // SessionActor: one ZCode conversation <-> one `pi-rs --mode rpc` child.
 // Owns the conversation topic's projection: rows, seq/revision accounting,
 // control/config/usage state, and the pi-rs event -> v4 delta state machine.
