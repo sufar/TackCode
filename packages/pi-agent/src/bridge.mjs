@@ -3,6 +3,9 @@
 // sessions-index / workspace-config topics, routes conversation topics to
 // SessionActors, and brokers provider credentials from host to pi-rs.
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   deleteSessionFile,
   findSessionFile,
@@ -14,7 +17,14 @@ import {
 } from "./piHome.mjs";
 import { previewText } from "./projection.mjs";
 import { SessionActor } from "./sessionActor.mjs";
-import piProviders from "./piProviders.generated.json" with { type: "json" };
+import { encodeTopicWireFrames } from "./wire.mjs";
+
+const piProviders = JSON.parse(
+  fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "piProviders.generated.json"),
+    "utf8",
+  ),
+);
 
 const ERROR_METHOD_NOT_FOUND = -32601;
 const ERROR_INVALID_PARAMS = -32602;
@@ -243,18 +253,26 @@ export class WorkspaceBridge {
     this.#subscriptionsByTopic.get(sub.topic)?.delete(subscriptionId);
   }
 
-  #sendFrame(topic, subscriptionId, { fromSeq, toSeq, payload }) {
-    this.#send({
-      method: "v4/conversation/frame",
-      params: { topic, subscriptionId, fromSeq, toSeq, sentAt: Date.now(), payload },
+  #sendFrame(topic, subscriptionId, { fromSeq, toSeq, payload }, deliveryKind = "online") {
+    const sub = this.#subscriptions.get(subscriptionId);
+    const ordinal = sub ? (sub.ordinal = (sub.ordinal ?? 0) + 1) : 1;
+    const logical = { topic, subscriptionId, fromSeq, toSeq, sentAt: Date.now(), payload };
+    const wires = encodeTopicWireFrames(logical, {
+      deliveryKind,
+      topic,
+      subscriptionId,
+      logicalFrameOrdinal: ordinal,
     });
+    for (const wire of wires) {
+      this.#send({ method: "v4/conversation/frame", params: wire });
+    }
   }
 
   sendConversationFrame(sessionId, subscriptionIds, { fromSeq, toSeq, payload }) {
     const topic = `conversation/${sessionId}`;
     for (const subscriptionId of subscriptionIds) {
       if (!this.#subscriptions.has(subscriptionId)) continue;
-      this.#sendFrame(topic, subscriptionId, { fromSeq, toSeq, payload });
+      this.#sendFrame(topic, subscriptionId, { fromSeq, toSeq, payload }, "online");
     }
   }
 
@@ -265,21 +283,23 @@ export class WorkspaceBridge {
     const fromSeq = state.seq;
     state.seq += deltaOps.length;
     for (const subscriptionId of subs) {
-      this.#sendFrame(topic, subscriptionId, {
-        fromSeq,
-        toSeq: state.seq,
-        payload: { kind: "deltas", deltas: deltaOps },
-      });
+      this.#sendFrame(
+        topic,
+        subscriptionId,
+        { fromSeq, toSeq: state.seq, payload: { kind: "deltas", deltas: deltaOps } },
+        "online",
+      );
     }
   }
 
-  #sendTopicSnapshot(topic, subscriptionId, snapshot) {
+  #sendTopicSnapshot(topic, subscriptionId, snapshot, deliveryKind = "initial") {
     const state = this.#topicState(topic);
-    this.#sendFrame(topic, subscriptionId, {
-      fromSeq: 0,
-      toSeq: state.seq,
-      payload: { kind: "snapshot", snapshot },
-    });
+    this.#sendFrame(
+      topic,
+      subscriptionId,
+      { fromSeq: 0, toSeq: state.seq, payload: { kind: "snapshot", snapshot } },
+      deliveryKind,
+    );
   }
 
   // ── sessions-index ──────────────────────────────────────────────────────
@@ -472,6 +492,10 @@ export class WorkspaceBridge {
         return this.#handleConversationUsage(params ?? {});
       case "v4/conversation/plans":
         return { plans: [], atSeq: 0, atLogEpoch: "0" };
+      case "v4/conversation/workflowRuns":
+        return { runs: [] };
+      case "v4/conversation/workflowRunEvents":
+        return { events: [], hasMore: false };
       case "v4/connection/flow":
         return {};
 
@@ -485,11 +509,32 @@ export class WorkspaceBridge {
       case "provider/updateAccountConfig":
         return this.#handleAccountConfig(params ?? {});
       case "workspace/updateInteractionPreferences":
+        return {
+          workspace: params?.workspace ?? this.workspaceRef(params?.workspace?.workspaceKey),
+          askUserQuestionAutoResolutionEnabled:
+            params?.preferences?.askUserQuestionAutoResolutionEnabled ?? true,
+          snoozedInteractionCount: 0,
+        };
       case "workspace/updateModelIoPreferences":
+        return {
+          workspace: params?.workspace ?? this.workspaceRef(params?.workspace?.workspaceKey),
+          fullRetentionEnabled: params?.preferences?.fullRetentionEnabled === true,
+          updatedSessionCount: 0,
+        };
       case "workspace/updateOffPeakToolPolicy":
+        return {
+          workspace: params?.workspace ?? this.workspaceRef(params?.workspace?.workspaceKey),
+          enabled: params?.enabled === true,
+        };
       case "workspace/updateDynamicWorkflowPolicy":
+        return {
+          workspace: params?.workspace ?? this.workspaceRef(params?.workspace?.workspaceKey),
+          enabled: params?.enabled === true,
+        };
       case "workspace/hooks/trustGrant":
-        return {};
+        return { accepted: true };
+      case "provider/testModelConnectivity":
+        return { success: true };
       case "session/setModel":
         return this.#handleLegacySetModel(params ?? {});
       case "session/setThoughtLevel":
@@ -528,7 +573,7 @@ export class WorkspaceBridge {
       // ACK first; the initial snapshot travels as a post-response owned
       // notification (protocol §3.1 ordering rule).
       queueMicrotask(() => {
-        this.#sendFrame(topic, subscriptionId, frame);
+        this.#sendFrame(topic, subscriptionId, frame, "initial");
       });
       return { ack: { subscriptionId, mode: "snapshot", logEpoch: actor.logEpoch } };
     }
@@ -563,7 +608,7 @@ export class WorkspaceBridge {
       const sessionId = sub.topic.slice("conversation/".length);
       const actor = await this.#ensureActor(sessionId, sub.workspaceId);
       const { frame } = actor.snapshot(subscriptionId);
-      queueMicrotask(() => this.#sendFrame(sub.topic, subscriptionId, frame));
+      queueMicrotask(() => this.#sendFrame(sub.topic, subscriptionId, frame, "recovery"));
       return { ack: { subscriptionId, mode: "snapshot", logEpoch: actor.logEpoch } };
     }
     const workspaceId = sub.topic.slice(sub.topic.indexOf("/") + 1);
@@ -572,7 +617,7 @@ export class WorkspaceBridge {
         ? this.#sessionsIndexSnapshot(workspaceId)
         : this.#workspaceConfigSnapshot(workspaceId);
     const state = this.#topicState(sub.topic);
-    queueMicrotask(() => this.#sendTopicSnapshot(sub.topic, subscriptionId, snapshot));
+    queueMicrotask(() => this.#sendTopicSnapshot(sub.topic, subscriptionId, snapshot, "recovery"));
     return { ack: { subscriptionId, mode: "snapshot", logEpoch: state.logEpoch } };
   }
 

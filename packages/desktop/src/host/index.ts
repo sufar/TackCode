@@ -2301,6 +2301,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
 
   const msg = result.data;
   const port = e.ports[0];
+  if (process.env.PICODE_DEBUG_HOST === "1") {
+    console.error(`[PICODE] host msg: ${String(msg.type)}`);
+  }
   if (msg.type === HostMessageTypes.DatabaseStartupControl) {
     if (msg.control.action === "snapshot") databaseStartup?.coordinator.publish();
     else if (msg.control.action === "retry")
@@ -2787,6 +2790,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
       databaseStartup.coordinator.publish();
       return;
     }
+    if (process.env.PICODE_DEBUG_HOST === "1") {
+      console.error("[PICODE] InitLocal: creating database startup");
+    }
     let basePortClosed = false;
     port.once("close", () => {
       basePortClosed = true;
@@ -2817,6 +2823,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           error,
         ),
       initializeServices: async () => {
+        if (process.env.PICODE_DEBUG_HOST === "1") {
+          console.error("[PICODE] initializeServices: begin");
+        }
         logger.info("initializing local services");
         activeSessionRealtimePort = createTaskRealtimeBridgeForHostInit(msg, parentPort);
         // 旧 Team 补组织必须与网络代理读取共用同一个 Setting 实例及写队列。

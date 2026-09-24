@@ -70,6 +70,11 @@ export function createHostDatabaseStartup(options: {
         }
         // 相对 sessionDbPath 按实际进程 cwd 解析；不能先准备 fallback 下的另一个空库。
         const pendingDirectories = [...directories];
+        if (process.env.PICODE_DEBUG_HOST === "1") {
+          console.error(
+            `[PICODE] host storage ok, preparing session storage for: ${pendingDirectories.join(", ")}`,
+          );
+        }
         for (const [index, cwd] of pendingDirectories.entries())
           await prepareSessionStorage({
             cwd,
@@ -84,6 +89,9 @@ export function createHostDatabaseStartup(options: {
               }),
             observePath,
           });
+        if (process.env.PICODE_DEBUG_HOST === "1") {
+          console.error("[PICODE] session storage prepared, starting services");
+        }
         report("starting_services");
         await options.initializeServices();
       } catch (error) {

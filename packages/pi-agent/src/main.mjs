@@ -4,14 +4,23 @@
 import { JsonlReader, JsonlWriter, safeParse } from "./jsonl.mjs";
 import { ProtocolError, WorkspaceBridge } from "./bridge.mjs";
 import { reportBootStorageReady, runPrepareStorage } from "./storageStartup.mjs";
+import fs from "node:fs";
 
 const ERROR_PARSE = -32700;
 const ERROR_INTERNAL = -32603;
 
 export async function main(argv = []) {
+  const logFile = process.env.PI_AGENT_LOG_FILE;
   const log = (message) => {
     // Diagnostics go to stderr only; stdout is the protocol channel.
     console.error(message);
+    if (logFile) {
+      try {
+        fs.appendFileSync(logFile, `${new Date().toISOString()} ${message}\n`);
+      } catch {
+        /* ignore */
+      }
+    }
   };
 
   // One-shot storage preparation mode (host worker: app-server --stdio
@@ -26,7 +35,9 @@ export async function main(argv = []) {
       output: process.stdout,
       log,
     });
-    return;
+    // The host resolves preparation on our exit code; do not linger on stray
+    // event-loop handles after the final frame has been flushed.
+    process.exit(process.exitCode ?? 0);
   }
 
   const writer = new JsonlWriter(process.stdout);

@@ -73,6 +73,7 @@ export async function reportBootStorageReady({ cwd, env, output }) {
 export async function runPrepareStorage({ cwd, env, input, output, log }) {
   const { path, databaseId } = sessionStorageDescriptor(cwd, env);
   const attemptId = randomUUID();
+  log?.(`[pi-agent] prepare-storage begin (path=${path})`);
   const lines = createInterface({ input });
   const acknowledgement = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("storage acknowledgement timeout")), 30_000);
@@ -121,6 +122,7 @@ export async function runPrepareStorage({ cwd, env, input, output, log }) {
       });
     }
     await writeFrame(output, { method: "startup/storagePrepared", params: {} });
+    log?.(`[pi-agent] prepare-storage done`);
   } catch (error) {
     log?.(`[pi-agent] prepare-storage failed: ${error?.message ?? error}`);
     try {

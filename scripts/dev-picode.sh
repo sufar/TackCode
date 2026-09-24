@@ -33,6 +33,10 @@ export ZCODE_AGENT_SERVER_ARGS_JSON="[\"$REPO_ROOT/packages/pi-agent/bin/pi-agen
 # its preparation entrypoint so the desktop startup gate accepts it.
 export ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY="$REPO_ROOT/packages/pi-agent/bin/pi-agent.mjs"
 export PI_AGENT_STORAGE_STARTUP=1
+# Bridge diagnostics (stdout is the protocol channel, stderr may be swallowed).
+export PI_AGENT_LOG_FILE="${PI_AGENT_LOG_FILE:-$HOME/pi-agent.log}"
+# Host startup checkpoints (temporary instrumentation; see hostDatabaseStartup).
+export PICODE_DEBUG_HOST="${PICODE_DEBUG_HOST:-1}"
 
 export ZCODE_ENV="${ZCODE_ENV:-production}"
 

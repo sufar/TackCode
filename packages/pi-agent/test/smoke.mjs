@@ -37,12 +37,14 @@ child.stdout.on("data", (chunk) => {
     if (!line.trim()) continue;
     const message = JSON.parse(line);
     if (message.method === "v4/conversation/frame") {
-      frames.push(message.params);
-      const snapshot = message.params.payload.snapshot;
-      const kinds = message.params.payload.kind === "snapshot"
-        ? `snapshot(${(snapshot.rows?.window ?? snapshot.sessions ?? snapshot.config) ? "ok" : "empty"})`
-        : `deltas(${message.params.payload.deltas.map((d) => d.op).join(",")})`;
-      console.log(`  frame ${message.params.topic} seq=(${message.params.fromSeq},${message.params.toSeq}] ${kinds}`);
+      const wire = message.params;
+      if (wire.kind === "fragment") continue;
+      const logical = wire.frame ?? wire;
+      frames.push(logical);
+      const kinds = logical.payload.kind === "snapshot"
+        ? `snapshot(${(logical.payload.snapshot.rows?.window ?? logical.payload.snapshot.sessions ?? logical.payload.snapshot.config) ? "ok" : "empty"})`
+        : `deltas(${logical.payload.deltas.map((d) => d.op).join(",")})`;
+      console.log(`  frame ${logical.topic} seq=(${logical.fromSeq},${logical.toSeq}] ${kinds} [${wire.deliveryKind ?? "?"}]`);
       continue;
     }
     if (message.id && pending.has(String(message.id))) {
