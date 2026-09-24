@@ -1,0 +1,369 @@
+[
+  {
+    "id": "amazon-bedrock",
+    "name": "Amazon Bedrock",
+    "baseUrl": "",
+    "api": "bedrock-converse-stream",
+    "envKeys": [
+      "AWS_BEARER_TOKEN_BEDROCK"
+    ]
+  },
+  {
+    "id": "ant-ling",
+    "name": "Ant Ling",
+    "baseUrl": "https://api.ant-ling.com/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "ANT_LING_API_KEY"
+    ]
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "ANTHROPIC_OAUTH_TOKEN",
+      "ANTHROPIC_API_KEY"
+    ]
+  },
+  {
+    "id": "azure-openai-responses",
+    "name": "Azure OpenAI Responses",
+    "baseUrl": "",
+    "api": "azure-openai-responses",
+    "envKeys": [
+      "AZURE_OPENAI_API_KEY"
+    ]
+  },
+  {
+    "id": "baseten",
+    "name": "Baseten",
+    "baseUrl": "https://inference.baseten.co/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "BASETEN_API_KEY"
+    ]
+  },
+  {
+    "id": "cerebras",
+    "name": "Cerebras",
+    "baseUrl": "https://api.cerebras.ai/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "CEREBRAS_API_KEY"
+    ]
+  },
+  {
+    "id": "cloudflare-ai-gateway",
+    "name": "Cloudflare AI Gateway",
+    "baseUrl": "",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "CLOUDFLARE_API_KEY"
+    ]
+  },
+  {
+    "id": "cloudflare-workers-ai",
+    "name": "Cloudflare Workers AI",
+    "baseUrl": "",
+    "api": "openai-completions",
+    "envKeys": [
+      "CLOUDFLARE_API_KEY"
+    ]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com",
+    "api": "openai-completions",
+    "envKeys": [
+      "DEEPSEEK_API_KEY"
+    ]
+  },
+  {
+    "id": "fireworks",
+    "name": "Fireworks",
+    "baseUrl": "https://api.fireworks.ai/inference",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "FIREWORKS_API_KEY"
+    ]
+  },
+  {
+    "id": "github-copilot",
+    "name": "GitHub Copilot",
+    "baseUrl": "https://api.individual.githubcopilot.com",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "COPILOT_GITHUB_TOKEN"
+    ]
+  },
+  {
+    "id": "google",
+    "name": "Google",
+    "baseUrl": "https://generativelanguage.googleapis.com",
+    "api": "google-generative-ai",
+    "envKeys": [
+      "GEMINI_API_KEY"
+    ]
+  },
+  {
+    "id": "google-vertex",
+    "name": "Google Vertex",
+    "baseUrl": "",
+    "api": "google-vertex",
+    "envKeys": [
+      "GOOGLE_CLOUD_API_KEY"
+    ]
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "GROQ_API_KEY"
+    ]
+  },
+  {
+    "id": "huggingface",
+    "name": "Hugging Face",
+    "baseUrl": "https://router.huggingface.co/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "HF_TOKEN"
+    ]
+  },
+  {
+    "id": "llama.cpp",
+    "name": "llama.cpp (local)",
+    "baseUrl": "http://localhost:8080/v1",
+    "api": "openai-completions",
+    "envKeys": []
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "baseUrl": "https://api.minimax.io/anthropic",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "MINIMAX_API_KEY"
+    ]
+  },
+  {
+    "id": "minimax-cn",
+    "name": "MiniMax (China)",
+    "baseUrl": "https://api.minimaxi.com/anthropic",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "MINIMAX_CN_API_KEY"
+    ]
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral",
+    "baseUrl": "https://api.mistral.ai",
+    "api": "mistral-conversations",
+    "envKeys": [
+      "MISTRAL_API_KEY"
+    ]
+  },
+  {
+    "id": "moonshotai",
+    "name": "Moonshot AI",
+    "baseUrl": "https://api.moonshot.ai/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "MOONSHOT_API_KEY"
+    ]
+  },
+  {
+    "id": "moonshotai-cn",
+    "name": "Moonshot AI (China)",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "MOONSHOT_API_KEY"
+    ]
+  },
+  {
+    "id": "nvidia",
+    "name": "NVIDIA",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "NVIDIA_API_KEY"
+    ]
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama (local)",
+    "baseUrl": "http://localhost:11434/v1",
+    "api": "openai-completions",
+    "envKeys": []
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com/v1",
+    "api": "openai-responses",
+    "envKeys": [
+      "OPENAI_API_KEY"
+    ]
+  },
+  {
+    "id": "openai-codex",
+    "name": "OpenAI Codex",
+    "baseUrl": "https://chatgpt.com/backend-api",
+    "api": "openai-codex-responses",
+    "envKeys": [
+      "OPENAI_API_KEY",
+      "CODEX_API_KEY"
+    ]
+  },
+  {
+    "id": "opencode",
+    "name": "OpenCode Zen",
+    "baseUrl": "https://opencode.ai/zen/v1",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "OPENCODE_API_KEY"
+    ]
+  },
+  {
+    "id": "opencode-go",
+    "name": "OpenCode Go",
+    "baseUrl": "https://opencode.ai/zen/go/v1",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "OPENCODE_API_KEY"
+    ]
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "OPENROUTER_API_KEY"
+    ]
+  },
+  {
+    "id": "qwen-token-plan",
+    "name": "Qwen Token Plan",
+    "baseUrl": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "QWEN_TOKEN_PLAN_API_KEY"
+    ]
+  },
+  {
+    "id": "qwen-token-plan-cn",
+    "name": "Qwen Token Plan (China)",
+    "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "QWEN_TOKEN_PLAN_CN_API_KEY"
+    ]
+  },
+  {
+    "id": "qwen-token-plan-individual",
+    "name": "Qwen Token Plan (Individual)",
+    "baseUrl": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "QWEN_TOKEN_PLAN_API_KEY"
+    ]
+  },
+  {
+    "id": "radius",
+    "name": "Radius",
+    "baseUrl": "",
+    "api": "pi-messages",
+    "envKeys": [
+      "RADIUS_API_KEY"
+    ]
+  },
+  {
+    "id": "together",
+    "name": "Together AI",
+    "baseUrl": "https://api.together.ai/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "TOGETHER_API_KEY"
+    ]
+  },
+  {
+    "id": "vercel-ai-gateway",
+    "name": "Vercel AI Gateway",
+    "baseUrl": "https://ai-gateway.vercel.sh",
+    "api": "anthropic-messages",
+    "envKeys": [
+      "AI_GATEWAY_API_KEY"
+    ]
+  },
+  {
+    "id": "xai",
+    "name": "xAI",
+    "baseUrl": "https://api.x.ai/v1",
+    "api": "openai-responses",
+    "envKeys": [
+      "XAI_API_KEY"
+    ]
+  },
+  {
+    "id": "xiaomi",
+    "name": "Xiaomi MiMo",
+    "baseUrl": "https://api.xiaomimimo.com/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "XIAOMI_API_KEY"
+    ]
+  },
+  {
+    "id": "xiaomi-token-plan-ams",
+    "name": "Xiaomi MiMo Token Plan (Amsterdam)",
+    "baseUrl": "https://token-plan-ams.xiaomimimo.com/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "XIAOMI_TOKEN_PLAN_AMS_API_KEY"
+    ]
+  },
+  {
+    "id": "xiaomi-token-plan-cn",
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "XIAOMI_TOKEN_PLAN_CN_API_KEY"
+    ]
+  },
+  {
+    "id": "xiaomi-token-plan-sgp",
+    "name": "Xiaomi MiMo Token Plan (Singapore)",
+    "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "api": "openai-completions",
+    "envKeys": [
+      "XIAOMI_TOKEN_PLAN_SGP_API_KEY"
+    ]
+  },
+  {
+    "id": "zai",
+    "name": "Z.AI Coding Plan",
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "api": "openai-completions",
+    "envKeys": [
+      "ZAI_API_KEY"
+    ]
+  },
+  {
+    "id": "zai-coding-cn",
+    "name": "Z.AI Coding Plan (China)",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "api": "openai-completions",
+    "envKeys": [
+      "ZAI_CODING_CN_API_KEY"
+    ]
+  }
+]
