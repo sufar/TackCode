@@ -1,11 +1,9 @@
 import {
-  BIGMODEL_PROVIDER_ID,
   buildBigModelApiUrl,
   BUILTIN_MODEL_PROVIDER_IDS,
   createUuid,
   type OAuthProviderId,
   ZCODE_ENV,
-  ZAI_PROVIDER_ID,
   type BuiltinModelProviderId,
   type UsageQuotaLimit,
   type UsageEntitlementSubscriptionDetail,
@@ -28,16 +26,8 @@ export interface PresetProviderSpec {
 }
 
 export const PRESET_PROVIDER_SPECS: PresetProviderSpec[] = [
-  {
-    id: BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan,
-    displayName: "Z.ai",
-    oauthProviderId: ZAI_PROVIDER_ID,
-  },
-  {
-    id: BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
-    displayName: "BigModel",
-    oauthProviderId: BIGMODEL_PROVIDER_ID,
-  },
+  // pi-rs-code: no Zhipu preset families (Z.ai / BigModel). The "preset" nav
+  // group renders nothing; all providers are user-added personal providers.
 ];
 
 export const PRESET_PROVIDER_SPEC_BY_ID = new Map<BuiltinModelProviderId, PresetProviderSpec>(
