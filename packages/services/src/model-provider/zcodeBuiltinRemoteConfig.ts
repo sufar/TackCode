@@ -1,4 +1,4 @@
-import { downloadZCodeBuiltinRelease, type ZCodeBuiltinRelease } from "@zcode/provider-node";
+import type { ZCodeBuiltinRelease } from "@zcode/provider-node";
 import type { ApiClient } from "@zcode/shared";
 
 interface FetchZCodeBuiltinRemoteReleaseOptions {
@@ -13,11 +13,9 @@ interface FetchZCodeBuiltinRemoteReleaseOptions {
 export async function fetchZCodeBuiltinRemoteRelease(
   options: FetchZCodeBuiltinRemoteReleaseOptions,
 ): Promise<ZCodeBuiltinRelease | null> {
-  return downloadZCodeBuiltinRelease({
-    endpointOrigin: options.endpointOrigin,
-    appVersion: options.appVersion,
-    platform: options.platform,
-    signal: options.signal,
-    request: (url, init) => options.apiClient.request(url, init),
-  });
+  // pi-rs-code: never download the remote builtin provider catalog — the
+  // upstream catalog is Zhipu-curated and the fork ships its own bundled
+  // config. (Upstream would fetch /api/v1/client/configs on the endpoint.)
+  void options;
+  return null;
 }

@@ -1,0 +1,65 @@
+# @pi-rs-code/pi-agent
+
+ZCode Protocol ⇄ pi-rs 桥接 agent。让 ZCode 桌面/Web 前端把 pi-rs 当作它的 agent 后端。
+
+## 接入方式
+
+ZCode host 通过 `ZCODE_AGENT_SERVER_COMMAND`（+ `ZCODE_AGENT_SERVER_ARGS_JSON`）把 agent
+替换为任意可执行文件；本包就是那个可执行文件。在 pi-rs-code fork 里由
+`desktop/src/main/piAgentDefaults.ts` 自动装配（打包态 = `resources/pi-agent`）。
+
+```bash
+ZCODE_AGENT_SERVER_COMMAND=/path/to/node \
+ZCODE_AGENT_SERVER_ARGS_JSON='[".../packages/pi-agent/bin/pi-agent.mjs"]' \
+ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY=".../packages/pi-agent/bin/pi-agent.mjs" \
+PI_AGENT_STORAGE_STARTUP=1 \
+ZCode
+```
+
+## 环境变量
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `PI_AGENT_PI_BINARY` | `pi-rs`（PATH） | 要驱动的 pi-rs 可执行文件 |
+| `PI_RS_AGENT_DIR` | `~/.pi-rs/agent` | pi-rs 数据目录（会话/凭据/设置） |
+| `PI_AGENT_STORAGE_STARTUP` | — | `1` = 启动时上报 agent 存储就绪帧（桌面启动门要求） |
+| `PI_AGENT_LOG_FILE` | — | bridge 诊断日志（stdout 是协议通道，勿混用） |
+
+## 协议覆盖（v0.1）
+
+- 订阅：`v4/conversation/subscribe|resync|unsubscribe`，topic =
+  `sessions-index/<ws>`、`workspace-config/<ws>`、`conversation/<sessionId>`
+- 命令：`v4/command` = createSession / sendText / stop / compact / renameSession /
+  deleteSession / switchModelConfig / switchCollaborationMode / setFollowupMode；
+  其余返回 ACK failed(`unsupported.command`)
+- 帧：`v4/conversation/frame`（snapshot + deltas），wire 封套 complete/fragment（crc32），
+  deliveryKind = initial/online/recovery
+- 查询：`v4/commands/query`、`v4/conversation/rowsRange`、`v4/conversation/usage`、
+  `v4/conversation/plans`、`v4/conversation/workflowRuns(-Events)`（后两者为空实现）
+- 旧方法：`workspace/readPresentation`、`provider/updateAccountConfig`（回执 revision）、
+  `workspace/updateInteractionPreferences|updateModelIoPreferences|updateOffPeakToolPolicy|
+  updateDynamicWorkflowPolicy`（回显结果）、`session/setModel|setThoughtLevel|setMode`、
+  `mcp/list`（空）、`provider/testModelConnectivity`、`workspace/hooks/trustGrant`
+- 存储启动握手：`--prepare-storage` 单发模式（startup/storagePath → storagePathReady →
+  storageState → storagePrepared）+ 启动就绪上报
+- 反向请求：`interaction/requestProviderRuntimeHeaders`（按需向 host 取 API Key →
+  写入 pi-rs `auth.json`）
+- 其余方法：`-32601 method not found`（host 对可选能力会降级）
+
+## pi-rs 侧映射
+
+- 每会话一个 `pi-rs --mode rpc` 子进程；冷恢复 = spawn + `switch_session` + `get_messages`
+  重建 rows（新 logEpoch，host 自动 resync）
+- pi 事件 → v4：text/thinking → assistantText/reasoning 行（row.delta 流式）；
+  toolcall_* → toolCall 行（inputText 流式）；tool_execution_* → 行状态/输出；
+  turn_end → turnHeader 终态；message_update error → control.lastError
+- 模型目录：`pi-rs models` 解析出有凭据 provider 的模型，经 workspace-config 发布
+- 会话列表：扫描 `<agentDir>/sessions/--<cwd>--/*.jsonl`（标题 = 自定义名或首条用户消息）
+
+## 测试
+
+```bash
+node test/smoke.mjs                 # 协议冒烟（无 LLM）
+node test/smoke.mjs --prompt "Reply with exactly: PONG" --provider deepseek --model deepseek-chat
+node test/cdp.mjs pages|eval|text|click-text|type|key|shot   # 驱动运行中的桌面 UI
+```
