@@ -26,12 +26,11 @@ mkdir -p "$PI_RS_AGENT_DIR"
 # The pi-rs binary the bridge should spawn.
 export PI_AGENT_PI_BINARY="${PI_AGENT_PI_BINARY:-pi-rs}"
 
-# Point the host's agent resolution at the bridge (official override point).
-export ZCODE_AGENT_SERVER_COMMAND="$NODE_DIR/node"
-export ZCODE_AGENT_SERVER_ARGS_JSON="[\"$REPO_ROOT/packages/pi-agent/bin/pi-agent.mjs\"]"
-# The bridge also implements the agent-owned storage startup protocol; declare
-# its preparation entrypoint so the desktop startup gate accepts it.
-export ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY="$REPO_ROOT/packages/pi-agent/bin/pi-agent.mjs"
+# Agent backend: piAgentDefaults (desktop main) resolves the bundled bridge
+# automatically; these remain available as explicit overrides when debugging.
+# export ZCODE_AGENT_SERVER_COMMAND=...
+# export ZCODE_AGENT_SERVER_ARGS_JSON=...
+# export ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY=...
 export PI_AGENT_STORAGE_STARTUP=1
 # Bridge diagnostics (stdout is the protocol channel, stderr may be swallowed).
 export PI_AGENT_LOG_FILE="${PI_AGENT_LOG_FILE:-$HOME/pi-agent.log}"

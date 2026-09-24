@@ -1,3 +1,12 @@
+# pi-rs-code
+
+> **本仓库是 [ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）的 fork：移除全部
+> 智谱/GLM 商业化内容，Agent 后端替换为 [pi-rs](https://github.com/sufar/pi-rs)。
+> 架构、开发指南与上游升级策略见 [PICODE.md](PICODE.md)。**
+> 以下为上游 ZCode 原始 README，仅供参考。
+
+---
+
 # ZCode
 
 <div align="center">
