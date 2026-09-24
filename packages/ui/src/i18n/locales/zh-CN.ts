@@ -3192,7 +3192,7 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.newProviderName": "新供应商",
   "settings.modelProvider.modelsPlaceholder": "每行一个模型名称",
   "settings.modelProvider.modelsCount": "{count} 个模型",
-  "settings.modelProvider.presetTitle": "智谱",
+  "settings.modelProvider.presetTitle": "预设",
   "settings.modelProvider.presetDescription":
     "内置 Z.ai 与 BigModel 供应商，支持通过 OAuth 辅助完成配置。",
   "settings.modelProvider.presetEmpty": "尚未同步，请先完成 OAuth 登录。",
