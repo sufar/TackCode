@@ -3,17 +3,34 @@
 // routed back; everything is serialized through one writer.
 import { JsonlReader, JsonlWriter, safeParse } from "./jsonl.mjs";
 import { ProtocolError, WorkspaceBridge } from "./bridge.mjs";
+import { reportBootStorageReady, runPrepareStorage } from "./storageStartup.mjs";
 
 const ERROR_PARSE = -32700;
 const ERROR_INTERNAL = -32603;
 
-export async function main() {
-  const writer = new JsonlWriter(process.stdout);
-  const send = (message) => writer.write(message);
+export async function main(argv = []) {
   const log = (message) => {
     // Diagnostics go to stderr only; stdout is the protocol channel.
     console.error(message);
   };
+
+  // One-shot storage preparation mode (host worker: app-server --stdio
+  // --prepare-storage --cwd <dir>).
+  if (argv.includes("--prepare-storage")) {
+    const cwdIndex = argv.indexOf("--cwd");
+    const cwd = cwdIndex !== -1 && argv[cwdIndex + 1] ? argv[cwdIndex + 1] : process.cwd();
+    await runPrepareStorage({
+      cwd,
+      env: { ...process.env },
+      input: process.stdin,
+      output: process.stdout,
+      log,
+    });
+    return;
+  }
+
+  const writer = new JsonlWriter(process.stdout);
+  const send = (message) => writer.write(message);
 
   const bridge = new WorkspaceBridge({
     send,
@@ -21,6 +38,16 @@ export async function main() {
     env: { ...process.env },
     log,
   });
+
+  // The host gates requests on agent-owned storage readiness when the command
+  // declares supportsStorageStartup (mirrored via PI_AGENT_STORAGE_STARTUP=1).
+  if (process.env.PI_AGENT_STORAGE_STARTUP === "1") {
+    await reportBootStorageReady({
+      cwd: process.cwd(),
+      env: { ...process.env },
+      output: process.stdout,
+    });
+  }
 
   const reader = new JsonlReader(process.stdin, {
     onLine: (line) => {

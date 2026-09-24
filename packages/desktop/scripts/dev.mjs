@@ -129,7 +129,17 @@ if (process.platform === "darwin" && existsSync(electronBinary)) {
   console.log(`[dev] Prepared macOS ZCode Dev bundle: ${devBundle.appPath}`);
 }
 
-const electron = spawn(electronCommand, ["."], {
+// pi-rs-code: allow dev-only extra Electron CLI args (e.g. --user-data-dir)
+// via env without forking this script's spawn plumbing.
+let electronExtraArgs = [];
+try {
+  const parsed = JSON.parse(process.env.ZCODE_DEV_ELECTRON_EXTRA_ARGS_JSON ?? "[]");
+  if (Array.isArray(parsed)) electronExtraArgs = parsed.filter((a) => typeof a === "string");
+} catch {
+  console.warn("[dev] ignoring malformed ZCODE_DEV_ELECTRON_EXTRA_ARGS_JSON");
+}
+
+const electron = spawn(electronCommand, [...electronExtraArgs, "."], {
   cwd: root,
   stdio: "inherit",
   env: { ...process.env, ELECTRON_RENDERER_URL: rendererUrl },

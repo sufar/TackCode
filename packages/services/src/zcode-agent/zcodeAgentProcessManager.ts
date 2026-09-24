@@ -440,11 +440,20 @@ export function resolveDefaultZCodeAgentCommand(
 ): ZCodeAgentCommand | null {
   const command = process.env.ZCODE_AGENT_SERVER_COMMAND?.trim();
   if (command) {
+    // pi-rs-code: custom agents may also declare agent-owned storage startup
+    // support (the desktop startup sequence hard-requires it). Upstream only
+    // marks bundled commands; the env override keeps custom agents fail-closed
+    // unless they explicitly provide a preparation entrypoint.
+    const storagePreparationEntry =
+      process.env.ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY?.trim() || undefined;
     return applyPresentationSurfaceToCommand(
       {
         command,
         args: parseArgsJson(process.env.ZCODE_AGENT_SERVER_ARGS_JSON) ?? ["app-server", "--stdio"],
         cwd: process.env.ZCODE_AGENT_SERVER_CWD?.trim() || context.workspacePath,
+        ...(storagePreparationEntry
+          ? { supportsStorageStartup: true, storagePreparationEntry }
+          : {}),
       },
       context.presentationSurface,
     );
