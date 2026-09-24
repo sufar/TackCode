@@ -152,7 +152,10 @@ function isDevAutoUpdateEnabled(): boolean {
 }
 
 function canUseAutoUpdaterInCurrentRuntime(): boolean {
-  return app.isPackaged || isDevAutoUpdateEnabled();
+  // pi-rs-code: the fork ships no update feed (upstream manifest lives on
+  // zcode.z.ai, which is unreachable by design here); auto-update is always
+  // off. Self-update of the pi-rs binary itself is `pi-rs update`.
+  return false;
 }
 
 function shouldRelaunchForDevAutoUpdateInstall(): boolean {
