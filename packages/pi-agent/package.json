@@ -1,5 +1,5 @@
 {
-  "name": "@pi-rs-code/pi-agent",
+  "name": "@tackcode/pi-agent",
   "version": "0.1.0",
   "private": true,
   "description": "ZCode Protocol bridge that lets the ZCode desktop/web frontend drive a pi-rs agent (pi-rs --mode rpc).",

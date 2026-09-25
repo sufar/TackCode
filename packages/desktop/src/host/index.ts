@@ -2301,8 +2301,8 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
 
   const msg = result.data;
   const port = e.ports[0];
-  if (process.env.PICODE_DEBUG_HOST === "1") {
-    console.error(`[PICODE] host msg: ${String(msg.type)}`);
+  if (process.env.TACKCODE_DEBUG_HOST === "1") {
+    console.error(`[TACKCODE] host msg: ${String(msg.type)}`);
   }
   if (msg.type === HostMessageTypes.DatabaseStartupControl) {
     if (msg.control.action === "snapshot") databaseStartup?.coordinator.publish();
@@ -2790,8 +2790,8 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
       databaseStartup.coordinator.publish();
       return;
     }
-    if (process.env.PICODE_DEBUG_HOST === "1") {
-      console.error("[PICODE] InitLocal: creating database startup");
+    if (process.env.TACKCODE_DEBUG_HOST === "1") {
+      console.error("[TACKCODE] InitLocal: creating database startup");
     }
     let basePortClosed = false;
     port.once("close", () => {
@@ -2823,8 +2823,8 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           error,
         ),
       initializeServices: async () => {
-        if (process.env.PICODE_DEBUG_HOST === "1") {
-          console.error("[PICODE] initializeServices: begin");
+        if (process.env.TACKCODE_DEBUG_HOST === "1") {
+          console.error("[TACKCODE] initializeServices: begin");
         }
         logger.info("initializing local services");
         activeSessionRealtimePort = createTaskRealtimeBridgeForHostInit(msg, parentPort);

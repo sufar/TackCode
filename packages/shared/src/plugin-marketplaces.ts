@@ -30,7 +30,7 @@ export const DEFAULT_ENABLED_OFFICIAL_PLUGIN_IDS: ReadonlySet<string> = new Set(
 ]);
 
 export const DEFAULT_PLUGIN_MARKETPLACES: DefaultPluginMarketplace[] = [
-  // pi-rs-code: the official marketplace CDN (cdn-zcode.z.ai) is a Zhipu
+  // TackCode: the official marketplace CDN (cdn-zcode.z.ai) is a Zhipu
   // commercial surface; the fork ships no official marketplace. Users can
   // still add personal marketplaces (git/URL/local) in Settings.
 ];

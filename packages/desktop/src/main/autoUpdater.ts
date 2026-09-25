@@ -152,7 +152,7 @@ function isDevAutoUpdateEnabled(): boolean {
 }
 
 function canUseAutoUpdaterInCurrentRuntime(): boolean {
-  // pi-rs-code: the fork ships no update feed (upstream manifest lives on
+  // TackCode: the fork ships no update feed (upstream manifest lives on
   // zcode.z.ai, which is unreachable by design here); auto-update is always
   // off. Self-update of the pi-rs binary itself is `pi-rs update`.
   return false;

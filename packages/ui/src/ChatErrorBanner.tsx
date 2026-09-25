@@ -208,7 +208,7 @@ export function ChatErrorBanner({
 
         {modelConfigMissing ? (
           <>
-            {/* pi-rs-code: no Coding Plan to upgrade to; the only action is
+            {/* TackCode: no Coding Plan to upgrade to; the only action is
                 opening model settings. */}
             <Button
               type="button"

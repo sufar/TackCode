@@ -8,7 +8,7 @@ import {
 export function shouldShowDesktopUpdateEntry(
   flavor: ZCodeProductFlavor = ZCODE_PRODUCT_FLAVOR,
 ): boolean {
-  // pi-rs-code: no update feed exists for the fork (see autoUpdater.ts).
+  // TackCode: no update feed exists for the fork (see autoUpdater.ts).
   void flavor;
   return false;
 }

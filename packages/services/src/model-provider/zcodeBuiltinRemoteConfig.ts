@@ -13,7 +13,7 @@ interface FetchZCodeBuiltinRemoteReleaseOptions {
 export async function fetchZCodeBuiltinRemoteRelease(
   options: FetchZCodeBuiltinRemoteReleaseOptions,
 ): Promise<ZCodeBuiltinRelease | null> {
-  // pi-rs-code: never download the remote builtin provider catalog — the
+  // TackCode: never download the remote builtin provider catalog — the
   // upstream catalog is Zhipu-curated and the fork ships its own bundled
   // config. (Upstream would fetch /api/v1/client/configs on the endpoint.)
   void options;

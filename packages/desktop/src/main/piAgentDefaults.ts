@@ -1,4 +1,4 @@
-// pi-rs-code: default the host's agent to the bundled pi-agent bridge when no
+// TackCode: default the host's agent to the bundled pi-agent bridge when no
 // explicit ZCODE_AGENT_SERVER_COMMAND override is present. Upstream resolves
 // to its own zcode-cli agent bundle; the fork ships the pi-rs bridge instead.
 import { existsSync } from "node:fs";

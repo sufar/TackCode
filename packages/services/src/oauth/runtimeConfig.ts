@@ -28,11 +28,11 @@ export interface OAuthRuntimeConfig {
  * 注意：这里只能在 host process 使用，避免把敏感配置暴露给 renderer。
  */
 export function createOAuthRuntimeConfig(env: NodeJS.ProcessEnv = process.env): OAuthRuntimeConfig {
-  // pi-rs-code: Zhipu OAuth (z.ai / bigmodel) accounts are commercial
+  // TackCode: Zhipu OAuth (z.ai / bigmodel) accounts are commercial
   // surfaces; the fork registers no OAuth providers. Model access is via
   // user-supplied API keys (Settings -> model providers) or pi-rs's own
   // credential store. Env overrides can re-enable these for development.
-  if (env.PICODE_ENABLE_ZHIPU_OAUTH === "1") {
+  if (env.TACKCODE_ENABLE_ZHIPU_OAUTH === "1") {
     return {
       providers: [createBigModelProviderRuntimeConfig(env), createZaiProviderRuntimeConfig(env)],
     };

@@ -26,7 +26,7 @@ export interface PresetProviderSpec {
 }
 
 export const PRESET_PROVIDER_SPECS: PresetProviderSpec[] = [
-  // pi-rs-code: no Zhipu preset families (Z.ai / BigModel). The "preset" nav
+  // TackCode: no Zhipu preset families (Z.ai / BigModel). The "preset" nav
   // group renders nothing; all providers are user-added personal providers.
 ];
 
@@ -61,7 +61,7 @@ interface CodingPlanProviderSpec {
 }
 
 export const CODING_PLAN_PROVIDER_SPECS: CodingPlanProviderSpec[] = [
-  // pi-rs-code: no Coding Plan providers — the entire 智谱/Coding Plan nav
+  // TackCode: no Coding Plan providers — the entire 智谱/Coding Plan nav
   // section disappears with this list empty (consumers map over it).
 ];
 

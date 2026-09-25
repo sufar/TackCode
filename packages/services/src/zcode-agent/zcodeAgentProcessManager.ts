@@ -440,7 +440,7 @@ export function resolveDefaultZCodeAgentCommand(
 ): ZCodeAgentCommand | null {
   const command = process.env.ZCODE_AGENT_SERVER_COMMAND?.trim();
   if (command) {
-    // pi-rs-code: custom agents may also declare agent-owned storage startup
+    // TackCode: custom agents may also declare agent-owned storage startup
     // support (the desktop startup sequence hard-requires it). Upstream only
     // marks bundled commands; the env override keeps custom agents fail-closed
     // unless they explicitly provide a preparation entrypoint.

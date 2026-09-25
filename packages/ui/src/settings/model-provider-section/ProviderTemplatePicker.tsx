@@ -34,7 +34,7 @@ export function ProviderTemplatePicker({
   const { intl, locale } = useZCodeIntl();
   const { dismissFeedback, showFeedback } = useProviderDetailFeedback();
   const customLabel = intl.formatMessage({ id: "settings.modelProvider.newProviderName" });
-  // pi-rs-code: Zhipu templates are stripped from the builtin catalog; keep a
+  // TackCode: Zhipu templates are stripped from the builtin catalog; keep a
   // single neutral group (the upstream zhipu group would render empty anyway).
   const zhipuIds: string[] = [];
   const groups = [

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Dev launcher for pi-rs-code: starts the ZCode desktop dev environment with
+# Dev launcher for TackCode: starts the ZCode desktop dev environment with
 # the pi-agent bridge as the agent backend (instead of apps/zcode-cli).
 #
-# Usage: scripts/dev-picode.sh [workspace-dir-to-open]
+# Usage: scripts/dev-tackcode.sh [workspace-dir-to-open]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,7 +11,7 @@ NODE_DIR="$REPO_ROOT/.toolchains/node-v24.14.0-darwin-arm64/bin"
 # Toolchain / runtime env (all caches stay inside the repo or /tmp so the
 # sandboxed dev shell can write them).
 export PATH="$NODE_DIR:$PATH"
-export HOME="${PICODE_HOME:-/tmp/picode-home}"
+export HOME="${TACKCODE_HOME:-/tmp/tackcode-home}"
 mkdir -p "$HOME"
 export COREPACK_HOME="$REPO_ROOT/.toolchains/corepack-home"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -35,7 +35,7 @@ export PI_AGENT_STORAGE_STARTUP=1
 # Bridge diagnostics (stdout is the protocol channel, stderr may be swallowed).
 export PI_AGENT_LOG_FILE="${PI_AGENT_LOG_FILE:-$HOME/pi-agent.log}"
 # Host startup checkpoints (temporary instrumentation; see hostDatabaseStartup).
-export PICODE_DEBUG_HOST="${PICODE_DEBUG_HOST:-1}"
+export TACKCODE_DEBUG_HOST="${TACKCODE_DEBUG_HOST:-1}"
 
 export ZCODE_ENV="${ZCODE_ENV:-production}"
 

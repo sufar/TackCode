@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// pi-rs-code: strip Zhipu (GLM) commercial entries from the builtin provider
+// TackCode: strip Zhipu (GLM) commercial entries from the builtin provider
 // catalog. Idempotent — safe to re-run after merging upstream releases.
 //
 // Removes:

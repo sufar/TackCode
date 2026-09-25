@@ -1,11 +1,11 @@
-# pi-rs-code
+# TackCode
 
 **pi-rs 的桌面壳** —— 基于 [ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）前端改造的
 pi-rs 桌面应用。Zhipu/GLM 的商业化内容（登录、套餐、广告、分享、反馈、官方市场、自动更新）
 已全部移除或中性化；Agent 后端由 ZCode 自家的 zcode-cli 换成了 **pi-rs**。
 
 ```
-┌────────────────────────────── pi-rs-code (Electron) ───────────────────────────┐
+┌────────────────────────────── TackCode (Electron) ───────────────────────────┐
 │  Web/UI (React)                                                                │
 │      │  @zcode/rpc (MessagePort)                                               │
 │  zcode-host (utility process: services, provider registry, tasks-index sqlite) │
@@ -37,13 +37,13 @@ wire 帧、存储启动握手），对内为每个会话 spawn 一个 `pi-rs --m
 | 官方服务端点（OAuth/套餐/分享/反馈/更新/远程目录/网关） | 默认指向 `127.0.0.1:9`（快速失败），env 仍可覆盖 | `packages/shared/src/zcodeEndpoint.ts` |
 | 智谱 provider 模板 + Coding Plan 账号 + GLM 内置模型 | 从内置目录剔除（可重跑 `scripts/strip-zhipu-providers.mjs`） | `config/provider/zcode-builtin.json` |
 | 远程内置目录下载 | 永不下载 | `packages/services/src/model-provider/zcodeBuiltinRemoteConfig.ts` |
-| Z.ai/BigModel OAuth 登录 | 默认不注册（`PICODE_ENABLE_ZHIPU_OAUTH=1` 可恢复） | `packages/services/src/oauth/runtimeConfig.ts` |
+| Z.ai/BigModel OAuth 登录 | 默认不注册（`TACKCODE_ENABLE_ZHIPU_OAUTH=1` 可恢复） | `packages/services/src/oauth/runtimeConfig.ts` |
 | 官方插件市场 CDN | 清空默认市场 | `packages/shared/src/plugin-marketplaces.ts` |
 | 桌面自动更新 / 强制更新 | 恒禁用（pi-rs 自更新走 `pi-rs update`） | `packages/desktop/src/main/autoUpdater.ts` |
 | 帮助菜单社区/反馈工单入口；文档链接 | 移除；改指 pi-rs 仓库 | `packages/ui/src/WorkspaceHelpMenuButton.tsx` |
 | Coding Plan 营销卡片/额度 widget/升级弹窗 | 数据源自 Coding Plan 账号，随账号剔除自然失效 | （设置页/输入区/侧栏） |
 | 遥测/ARMS | 上游默认即关（无端点），未改动 | — |
-| 品牌（名称/图标/i18n/启动页/关于） | pi-rs-code + pi-rs 钳子 logo | desktop identity / locales / icons |
+| 品牌（名称/图标/i18n/启动页/关于） | TackCode + pi-rs 钳子 logo | desktop identity / locales / icons |
 
 `apps/zcode-cli`（Zhipu 自家 agent，含 GLM 网关改道代码）**不参与构建与分发**，
 仅作为上游源码保留在仓库里；bridge 取代了它的位置。
@@ -56,18 +56,18 @@ wire 帧、存储启动握手），对内为每个会话 spawn 一个 `pi-rs --m
 corepack pnpm install
 
 # 启动桌面 dev（需要 pi-rs 可执行文件；PI_AGENT_PI_BINARY 可显式指定）
-PI_AGENT_PI_BINARY=/path/to/pi-rs scripts/dev-picode.sh
+PI_AGENT_PI_BINARY=/path/to/pi-rs scripts/dev-tackcode.sh
 ```
 
-`dev-picode.sh` 会设置隔离的数据目录（`PICODE_HOME`，默认 `/tmp/picode-home`）、
+`dev-tackcode.sh` 会设置隔离的数据目录（`TACKCODE_HOME`，默认 `/tmp/tackcode-home`）、
 Electron userData、`PI_RS_AGENT_DIR`（pi-rs 的会话/凭据目录），并通过
 `piAgentDefaults` 让 host 自动使用 `packages/pi-agent` 作为 agent。
 
 常用调试入口：
 
-- `PI_AGENT_LOG_FILE`（默认 `$PICODE_HOME/pi-agent.log`）：bridge 日志
+- `PI_AGENT_LOG_FILE`（默认 `$TACKCODE_HOME/pi-agent.log`）：bridge 日志
 - `PI_AGENT_TRACE=1`：bridge 协议收发（预留）
-- `PICODE_DEBUG_HOST=1`：host 启动检查点日志
+- `TACKCODE_DEBUG_HOST=1`：host 启动检查点日志
 - `packages/pi-agent/test/smoke.mjs`：不依赖桌面的协议冒烟
   `node test/smoke.mjs --prompt "Reply with exactly: PONG" --provider deepseek --model deepseek-chat`
 - `packages/pi-agent/test/cdp.mjs`：CDP 驱动运行中的桌面 UI（pages/eval/text/click-text/type/key/shot）
@@ -108,8 +108,9 @@ opencode-go/zen→opencode-go/opencode）。
 
 ```bash
 git fetch upstream
-git switch pi-rs-code
-git rebase --onto upstream/main <旧基线> pi-rs-code
+# 本仓库的产品分支即 main（fork 首页分支）；升级时把补丁序列 rebase 到新基线：
+git switch main
+git rebase --onto upstream/main <旧基线> main
 # 解决冲突（我们的补丁都集中在少量文件；见下）
 corepack pnpm install
 node scripts/strip-zhipu-providers.mjs   # 上游新增/改动目录条目后重跑
@@ -117,16 +118,16 @@ corepack pnpm typecheck && corepack pnpm lint
 node packages/pi-agent/test/smoke.mjs    # 协议冒烟（会验证 wire 帧与 seq 不变量）
 ```
 
-补丁面（按冲突概率排序，全部带 `pi-rs-code` 注释锚点便于 grep）：
+补丁面（按冲突概率排序，全部带 `TackCode` 注释锚点便于 grep）：
 
 1. `packages/pi-agent/**` — 全新目录，零冲突。
-2. `scripts/dev-picode.sh`、`scripts/strip-zhipu-providers.mjs` — 新增，零冲突。
+2. `scripts/dev-tackcode.sh`、`scripts/strip-zhipu-providers.mjs` — 新增，零冲突。
 3. `packages/shared/src/zcodeEndpoint.ts`、`plugin-marketplaces.ts` — 常量改动，小冲突面。
 4. `packages/services/src/zcode-agent/zcodeAgentProcessManager.ts`（env 覆盖扩展）、
    `oauth/runtimeConfig.ts`、`model-provider/zcodeBuiltinRemoteConfig.ts` — 单点小改。
 5. `packages/desktop/src/main/{piAgentDefaults.ts,index.ts}`、`autoUpdater.ts`、
    `scripts/dev.mjs`、`electron-builder.config.js` — 单点小改。
-6. `packages/ui` 的 help 菜单/模板选择器 + 两个 locale（大批量 ZCode→pi-rs-code 文案）—
+6. `packages/ui` 的 help 菜单/模板选择器 + 两个 locale（大批量 ZCode→TackCode 文案）—
    i18n 冲突最多，建议冲突时取上游版本后重跑文案替换（sed）。
 7. `config/provider/zcode-builtin.json` — 必然冲突，**直接取上游版本再跑
    `scripts/strip-zhipu-providers.mjs`**。
@@ -138,6 +139,6 @@ row 模型、wire 帧），先跑它再看 UI。
 ## 合规
 
 - 上游 ZCode 为 Apache-2.0（见 `LICENSE`），本仓库保留其 `LICENSE`/`NOTICE.md`/
-  `THIRD-PARTY-NOTICES.md`；修改遵循 Apache-2.0 第 4(b) 条以 `pi-rs-code` 注释与
+  `THIRD-PARTY-NOTICES.md`；修改遵循 Apache-2.0 第 4(b) 条以 `TackCode` 注释与
   提交历史标注。"ZCode"、智谱、GLM 商标属于原厂商，此处仅作来源说明。
 - pi-rs 侧同样为 Apache-2.0。

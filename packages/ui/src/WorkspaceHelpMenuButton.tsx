@@ -44,7 +44,7 @@ export function WorkspaceHelpMenuButton({
   const helpMenuActions = createHelpMenuActionHandlers({
     platform,
     intl,
-    // pi-rs-code: the hosted feedback service is removed; the submit entry
+    // TackCode: the hosted feedback service is removed; the submit entry
     // is never reachable from this menu.
     openSubmit: () => {},
   });
@@ -85,7 +85,7 @@ export function WorkspaceHelpMenuButton({
           <BookOpenIcon className="size-4" />
           {intl.formatMessage({ id: "workspaceHeader.help.docs" })}
         </DropdownMenuItem>
-        {/* pi-rs-code: Zhipu community (Feishu/Discord) and the hosted
+        {/* TackCode: Zhipu community (Feishu/Discord) and the hosted
             feedback/工单 service are commercial surfaces; removed. */}
         {/* Windows/Linux 没有原生菜单栏，自绘标题栏箭头菜单也已下线，
             资源管理器只能从这里进；Web 端没有该窗口，不渲染。 */}

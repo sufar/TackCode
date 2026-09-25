@@ -388,7 +388,7 @@ export function ModelProviderSectionNavigation({
       <div className="flex min-h-0 flex-col gap-3 max-md:gap-1">
         {navigationGroups
           .filter(
-            // pi-rs-code: hide groups that have no items once their loading
+            // TackCode: hide groups that have no items once their loading
             // state settles (upstream only collapses the "custom" group).
             (group) =>
               group.items.length > 0 ||

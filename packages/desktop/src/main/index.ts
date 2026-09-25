@@ -259,7 +259,7 @@ if (!app.isPackaged && process.env.ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT !==
 }
 
 app.setName(runtimeApplicationName);
-// pi-rs-code: default the agent backend to the bundled pi-agent bridge before
+// TackCode: default the agent backend to the bundled pi-agent bridge before
 // any host process can resolve an agent command (env override always wins).
 const { applyPiAgentDefaults } = await import("./piAgentDefaults.js");
 applyPiAgentDefaults();

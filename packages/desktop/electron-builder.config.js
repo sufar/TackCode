@@ -571,7 +571,7 @@ export default {
   extraResources: [
     { from: resolve(workspaceRoot, noticesFileName), to: noticesFileName },
     {
-      // pi-rs-code: the pi-agent bridge is the fork's default agent backend;
+      // TackCode: the pi-agent bridge is the fork's default agent backend;
       // ship it next to the app so piAgentDefaults can point the host at it.
       from: resolve(workspaceRoot, "packages/pi-agent"),
       to: "pi-agent",

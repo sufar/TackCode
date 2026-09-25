@@ -129,7 +129,7 @@ if (process.platform === "darwin" && existsSync(electronBinary)) {
   console.log(`[dev] Prepared macOS ZCode Dev bundle: ${devBundle.appPath}`);
 }
 
-// pi-rs-code: allow dev-only extra Electron CLI args (e.g. --user-data-dir)
+// TackCode: allow dev-only extra Electron CLI args (e.g. --user-data-dir)
 // via env without forking this script's spawn plumbing.
 let electronExtraArgs = [];
 try {

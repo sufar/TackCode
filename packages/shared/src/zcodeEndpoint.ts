@@ -1,6 +1,6 @@
 import type { ZCodeEnv } from "./env.js";
 
-// pi-rs-code: upstream defaults point at Zhipu-operated services (OAuth,
+// TackCode: upstream defaults point at Zhipu-operated services (OAuth,
 // billing, share, feedback, update manifest, remote provider catalog,
 // Coding Plan gateway). The fork has no such backend; the loopback discard
 // address makes every official-service call fail fast instead of leaking

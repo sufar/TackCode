@@ -41,7 +41,7 @@ export function shouldShowRootStartupLoading(state: RootStartupLoadingVisibility
 }
 
 export function shouldEnableProviderAvailabilityLoginEntryGuard(): boolean {
-  // pi-rs-code: the upstream guard opens a Zhipu-centric login gate when no
+  // TackCode: the upstream guard opens a Zhipu-centric login gate when no
   // model provider is usable. The fork has no builtin account/OAuth
   // providers, so that gate can only ever mislead; users configure personal
   // providers in Settings (the workspace notice links there) or via pi-rs's

@@ -1,7 +1,7 @@
 import { cn } from "@/components/lib/utils.js";
 
 export function ZCodeAboutLogo({ className }: { className?: string }) {
-  // pi-rs-code: pi-rs pincer mark (upstream Z glyph replaced).
+  // TackCode: pi-rs pincer mark (upstream Z glyph replaced).
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -23,7 +23,7 @@ export function ZCodeAboutLogo({ className }: { className?: string }) {
 }
 
 export function ZCodeWordmarkLogo({ className }: { className?: string }) {
-  // pi-rs-code: text wordmark replacing the ZCODE glyph wordmark.
+  // TackCode: text wordmark replacing the ZCODE glyph wordmark.
   return (
     <svg
       width="244"
@@ -44,7 +44,7 @@ export function ZCodeWordmarkLogo({ className }: { className?: string }) {
         fontWeight="600"
         letterSpacing="-1"
       >
-        pi-rs-code
+        TackCode
       </text>
     </svg>
   );

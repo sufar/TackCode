@@ -1,11 +1,11 @@
-# @pi-rs-code/pi-agent
+# @tackcode/pi-agent
 
 ZCode Protocol ⇄ pi-rs 桥接 agent。让 ZCode 桌面/Web 前端把 pi-rs 当作它的 agent 后端。
 
 ## 接入方式
 
 ZCode host 通过 `ZCODE_AGENT_SERVER_COMMAND`（+ `ZCODE_AGENT_SERVER_ARGS_JSON`）把 agent
-替换为任意可执行文件；本包就是那个可执行文件。在 pi-rs-code fork 里由
+替换为任意可执行文件；本包就是那个可执行文件。在 TackCode fork 里由
 `desktop/src/main/piAgentDefaults.ts` 自动装配（打包态 = `resources/pi-agent`）。
 
 ```bash
