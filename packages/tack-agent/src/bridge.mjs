@@ -171,6 +171,7 @@ export class WorkspaceBridge {
   #hostWorkspacePath = null;
   #generateTextProcesses = new Map(); // operationId -> one-shot print-mode child
   #attachments;
+  #childParentMap = new Map(); // childSessionId -> parentSessionId
 
   constructor({ send, cwd, env, log }) {
     this.#send = send;
@@ -182,6 +183,10 @@ export class WorkspaceBridge {
 
   get attachments() {
     return this.#attachments;
+  }
+
+  registerChildSession(parentSessionId, childSessionId) {
+    this.#childParentMap.set(childSessionId, parentSessionId);
   }
 
   #withAttachmentError(run) {
@@ -462,9 +467,11 @@ export class WorkspaceBridge {
   // ── sessions-index ──────────────────────────────────────────────────────
 
   #sessionSummaryFor(actor, workspaceId) {
+    const parentSessionId = this.#childParentMap.get(actor.sessionId);
     return {
       sessionId: actor.sessionId,
       workspaceId,
+      ...(parentSessionId ? { parentSessionId } : {}),
       title: actor.meta.title || previewText(actor.firstUserText) || "New session",
       titleSource: actor.meta.titleSource,
       phase: actor.control.phase,
@@ -488,9 +495,11 @@ export class WorkspaceBridge {
     for (const entry of byDisk) {
       if (seen.has(entry.sessionId)) continue;
       const meta = readSessionFileMeta(entry.file);
+      const parentSessionId = this.#childParentMap.get(entry.sessionId);
       sessions.push({
         sessionId: entry.sessionId,
         workspaceId,
+        ...(parentSessionId ? { parentSessionId } : {}),
         title:
           meta.name ||
           previewText(meta.firstUserText) ||
@@ -771,7 +780,7 @@ export class WorkspaceBridge {
       const { frame } = actor.snapshot(subscriptionId);
       // ACK first; the initial snapshot travels as a post-response owned
       // notification (protocol §3.1 ordering rule).
-      queueMicrotask(() => {
+      setImmediate(() => {
         this.#sendFrame(topic, subscriptionId, frame, "initial");
       });
       return { ack: { subscriptionId, mode: "snapshot", logEpoch: actor.logEpoch } };
@@ -781,7 +790,7 @@ export class WorkspaceBridge {
       const subscriptionId = this.#registerSubscription(topic, connectionId, "sessions-index");
       const snapshot = this.#sessionsIndexSnapshot(workspaceId);
       const state = this.#topicState(topic);
-      queueMicrotask(() => {
+      setImmediate(() => {
         this.#sendTopicSnapshot(topic, subscriptionId, snapshot);
       });
       return { ack: { subscriptionId, mode: "snapshot", logEpoch: state.logEpoch } };
@@ -791,7 +800,7 @@ export class WorkspaceBridge {
       const subscriptionId = this.#registerSubscription(topic, connectionId, "workspace-config");
       const snapshot = this.#workspaceConfigSnapshot(workspaceId);
       const state = this.#topicState(topic);
-      queueMicrotask(() => {
+      setImmediate(() => {
         this.#sendTopicSnapshot(topic, subscriptionId, snapshot);
       });
       return { ack: { subscriptionId, mode: "snapshot", logEpoch: state.logEpoch } };
@@ -807,7 +816,7 @@ export class WorkspaceBridge {
       const sessionId = sub.topic.slice("conversation/".length);
       const actor = await this.#ensureActor(sessionId, sub.workspaceId);
       const { frame } = actor.snapshot(subscriptionId);
-      queueMicrotask(() => this.#sendFrame(sub.topic, subscriptionId, frame, "recovery"));
+      setImmediate(() => this.#sendFrame(sub.topic, subscriptionId, frame, "recovery"));
       return { ack: { subscriptionId, mode: "snapshot", logEpoch: actor.logEpoch } };
     }
     const workspaceId = sub.topic.slice(sub.topic.indexOf("/") + 1);
@@ -816,7 +825,7 @@ export class WorkspaceBridge {
         ? this.#sessionsIndexSnapshot(workspaceId)
         : this.#workspaceConfigSnapshot(workspaceId);
     const state = this.#topicState(sub.topic);
-    queueMicrotask(() => this.#sendTopicSnapshot(sub.topic, subscriptionId, snapshot, "recovery"));
+    setImmediate(() => this.#sendTopicSnapshot(sub.topic, subscriptionId, snapshot, "recovery"));
     return { ack: { subscriptionId, mode: "snapshot", logEpoch: state.logEpoch } };
   }
 

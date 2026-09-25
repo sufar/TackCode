@@ -127,6 +127,13 @@ function zcodeResponseToPiDecision(response) {
   return { decision: hasAlways ? "allowAlways" : "allow" };
 }
 
+const CHILD_SESSION_MARKER_RE = /\[childSessionId:\s*([0-9a-f-]{36})\]/;
+
+function parseChildSessionIdFromText(text) {
+  const match = CHILD_SESSION_MARKER_RE.exec(text ?? "");
+  return match?.[1] ?? null;
+}
+
 /** Map a v4 toolCall row to a legacy zcodeToolStateSchema state. */
 function legacyToolState(row) {
   const startedAt = row.startedAt ?? row.createdAt;
@@ -189,6 +196,7 @@ export class SessionActor {
   #rowById = new Map();
   #contentRows = new Map(); // streaming contentIndex -> row
   #toolRows = new Map(); // toolCallId -> row
+  #subagentRows = new Map(); // parentToolCallId -> subagent row
   #turnId = null;
   #turnHeaderRow = null;
   #turnOpen = false;
@@ -475,6 +483,29 @@ export class SessionActor {
     this.#rowById.set(row.rowId, row);
   }
 
+  #subagentsProjection() {
+    const rows = [...this.#subagentRows.values()];
+    // runningSubagentSummarySchema requires childSessionId; foreground
+    // children only get theirs at completion, so running[] carries just the
+    // entries whose id is already known.
+    const running = rows
+      .filter((row) => row.status === "running" && row.childSessionId)
+      .map((row) => ({
+        childSessionId: row.childSessionId,
+        ...(row.parentToolCallId ? { toolCallId: row.parentToolCallId } : {}),
+        subagentType: row.subagentType,
+        title: row.summaryText || row.subagentType,
+        status: "running",
+        ...(row.startedAt ? { startedAt: row.startedAt } : {}),
+      }));
+    return {
+      revision: this.revision,
+      childSessionIds: rows.flatMap((row) => (row.childSessionId ? [row.childSessionId] : [])),
+      running,
+      endedTotal: rows.filter((row) => row.status !== "running").length,
+    };
+  }
+
   #accumulateUsage(usage) {
     if (!usage || typeof usage !== "object") return;
     this.#assistantUsageSeen = usage;
@@ -559,7 +590,7 @@ export class SessionActor {
             pendingInteractions: this.pendingInteractions,
             pendingCommands: [],
             backgroundWorks: [],
-            subagents: { revision: 0, childSessionIds: [], running: [], endedTotal: 0 },
+            subagents: this.#subagentsProjection(),
             goal: null,
             plan: null,
             workspaceHookAdmission: null,
@@ -1422,6 +1453,23 @@ export class SessionActor {
 
   #handleToolExecutionStart(event) {
     const row = this.#toolRows.get(event.toolCallId);
+    if (event.toolName === "subagent") {
+      const args = event.args ?? {};
+      const subRow = this.#rowFactory.subagent({
+        turnId: this.#turnId ?? "turn-0",
+        at: Date.now(),
+        seq: this.seq + 1,
+        parentToolCallId: event.toolCallId,
+        subagentType: args.agent ?? "general",
+        summaryText: args.description ?? previewText(args.task ?? "") ?? "",
+        status: "running",
+      });
+      if (args.run_in_background === true) subRow.backgrounded = true;
+      subRow.startedAt = Date.now();
+      this.#subagentRows.set(event.toolCallId, subRow);
+      this.#pushRow(subRow);
+      this.#emit([{ op: "row.appended", row: subRow }]);
+    }
     if (!row) return;
     row.status = "running";
     row.startedAt = Date.now();
@@ -1434,6 +1482,29 @@ export class SessionActor {
 
   #handleToolExecutionEnd(event) {
     const row = this.#toolRows.get(event.toolCallId);
+    const subRow = this.#subagentRows.get(event.toolCallId);
+    if (subRow) {
+      const details = event.result?.details ?? {};
+      const text = toolResultText(event.result ?? {});
+      const childSessionId =
+        details.childSessionId ?? parseChildSessionIdFromText(text) ?? undefined;
+      subRow.status = event.isError ? "failed" : "success";
+      subRow.endedAt = Date.now();
+      if (childSessionId) subRow.childSessionId = childSessionId;
+      if (details.taskId && details.background === true) subRow.workId = details.taskId;
+      const preview = previewText(text);
+      if (preview) subRow.summaryText = preview;
+      this.#emit([{ op: "row.upserted", row: subRow }]);
+      if (childSessionId) {
+        this.#bridge.registerChildSession(this.sessionId, childSessionId);
+      }
+      // Background children stay "running" (the id was handed out up front);
+      // their completion arrives later as a background-task notification.
+      if (details.background === true) {
+        subRow.status = "running";
+        this.#emit([{ op: "row.upserted", row: subRow }]);
+      }
+    }
     if (!row) return;
     row.status = event.isError ? "error" : "success";
     row.endedAt = Date.now();

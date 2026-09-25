@@ -15,7 +15,14 @@ export function agentDir(env = process.env) {
 
 /** Mirror of pi-session's default_session_dir: --<cwd with /\: -> ->--. */
 export function sessionDirForCwd(cwd, env = process.env) {
-  const resolved = path.resolve(cwd).replace(/\\/g, "/");
+  // pi-rs resolves the process cwd through symlinks (e.g. /tmp -> /private/tmp);
+  // scan the same canonical path or sessions vanish for symlinked workspaces.
+  let resolved;
+  try {
+    resolved = fs.realpathSync(cwd).replace(/\\/g, "/");
+  } catch {
+    resolved = path.resolve(cwd).replace(/\\/g, "/");
+  }
   let encoded = resolved.replace(/[/\\:]/g, "-");
   if (encoded.startsWith("-")) encoded = encoded.slice(1);
   return path.join(agentDir(env), "sessions", `--${encoded}--`);

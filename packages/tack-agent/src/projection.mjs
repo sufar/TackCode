@@ -131,6 +131,17 @@ export class RowFactory {
     };
   }
 
+  subagent({ turnId, at, seq, parentToolCallId, subagentType, summaryText, status = "running" }) {
+    return {
+      ...this.#base("subagent", turnId, at, seq),
+      kind: "subagent",
+      parentToolCallId,
+      subagentType,
+      status,
+      summaryText,
+    };
+  }
+
   timelineMarker({ turnId, at, seq, marker, lane, sourceCommandId }) {
     return {
       ...this.#base("timelineMarker", turnId, at, seq),
