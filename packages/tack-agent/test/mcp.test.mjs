@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   SessionMcpStore,
+  loadFileMcpServers,
   piStatusToZCodeStatuses,
   protocolMcpServersToPi,
 } from "../src/mcp.mjs";
@@ -138,4 +139,87 @@ test("SessionMcpStore: 损坏文件按空档处理（不 throw）", () => {
   const store = new SessionMcpStore(file);
   assert.equal(store.get("anything"), undefined);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(value));
+}
+
+test("loadFileMcpServers: 四个来源合并，user 盖 project、zcode 盖 agents", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-home-"));
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-ws-"));
+  writeJson(path.join(ws, ".agents", "mcp.json"), {
+    mcpServers: {
+      "only-project-agents": { command: "pa" },
+      shared: { command: "from-project-agents" },
+    },
+  });
+  writeJson(path.join(ws, ".zcode", "config.json"), {
+    mcp: { servers: { shared: { command: "from-project-zcode" }, "only-project": { command: "pz" } } },
+  });
+  writeJson(path.join(home, ".agents", "mcp.json"), {
+    mcpServers: { shared: { command: "from-user-agents" }, "only-user-agents": { command: "ua" } },
+  });
+  writeJson(path.join(home, ".zcode", "cli", "config.json"), {
+    mcp: { servers: { shared: { command: "from-user-zcode" }, "only-user": { command: "uz" } } },
+  });
+  const out = loadFileMcpServers({ homeDir: home, workspacePath: ws });
+  assert.equal(out.shared.command, "from-user-zcode", "user zcode 最高优先");
+  assert.equal(out["only-project"].command, "pz");
+  assert.equal(out["only-project-agents"].command, "pa");
+  assert.equal(out["only-user-agents"].command, "ua");
+  assert.equal(out["only-user"].command, "uz");
+  assert.equal(Object.keys(out).length, 5);
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("loadFileMcpServers: enabled:false 在高优先级文件里盖掉同名条目", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-home-"));
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-ws-"));
+  writeJson(path.join(ws, ".zcode", "config.json"), {
+    mcp: { servers: { srv: { command: "project-cmd" } } },
+  });
+  writeJson(path.join(home, ".zcode", "cli", "config.json"), {
+    mcp: { servers: { srv: { command: "user-cmd", enabled: false } } },
+  });
+  const out = loadFileMcpServers({ homeDir: home, workspacePath: ws });
+  assert.equal(out.srv, undefined, "user 级停用后不再出现");
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("loadFileMcpServers: mcp.enabled === false 全局关闭", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-home-"));
+  writeJson(path.join(home, ".zcode", "cli", "config.json"), {
+    mcp: { enabled: false, servers: { srv: { command: "x" } } },
+  });
+  const out = loadFileMcpServers({ homeDir: home, workspacePath: undefined });
+  assert.deepEqual(out, {});
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test("loadFileMcpServers: http 条目带 oauth 翻译", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-home-"));
+  writeJson(path.join(home, ".zcode", "cli", "config.json"), {
+    mcp: {
+      servers: {
+        remote: {
+          type: "http",
+          url: "http://localhost:9/mcp",
+          headers: { authorization: "Bearer x" },
+          oauth: { type: "authorization_code", scope: "read" },
+        },
+      },
+    },
+  });
+  const out = loadFileMcpServers({ homeDir: home, workspacePath: undefined });
+  assert.deepEqual(out.remote, {
+    type: "http",
+    url: "http://localhost:9/mcp",
+    headers: { authorization: "Bearer x" },
+    oauth: { scopes: ["read"] },
+  });
+  fs.rmSync(home, { recursive: true, force: true });
 });

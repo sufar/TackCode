@@ -65,6 +65,94 @@ export function protocolMcpServersToPi(servers) {
   return out;
 }
 
+function readJsonSafe(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function objectOfStrings(value) {
+  const out = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof k === "string" && typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+function isFileServerEnabled(config) {
+  // enable 是桌面端早期的错别字口径，读写两侧都只认 enabled，但存量配置可能只有 enable。
+  return config?.enabled !== false && config?.enable !== false;
+}
+
+function normalizeFileServerEntry(config) {
+  // zcode/agents 配置文件形状（mcp.servers / mcpServers，env/headers 已是对象）→ pi 条目。
+  if (!config || typeof config !== "object") return null;
+  if (typeof config.command === "string" && config.command) {
+    return {
+      command: config.command,
+      args: Array.isArray(config.args) ? config.args.filter((a) => typeof a === "string") : [],
+      env: objectOfStrings(config.env),
+    };
+  }
+  if (typeof config.url === "string" && config.url) {
+    const entry = {
+      type: config.type === "sse" ? "sse" : "http",
+      url: config.url,
+      headers: objectOfStrings(config.headers),
+    };
+    const oauth = translateOAuth(config.oauth);
+    if (oauth !== undefined) entry.oauth = oauth;
+    return entry;
+  }
+  return null;
+}
+
+function collectServers(out, servers) {
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return;
+  for (const [name, config] of Object.entries(servers)) {
+    if (!name) continue;
+    if (!isFileServerEnabled(config)) {
+      // 高优先级文件显式停用 = 盖掉低优先级同名条目。
+      delete out[name];
+      continue;
+    }
+    const entry = normalizeFileServerEntry(config);
+    if (entry) out[name] = entry;
+  }
+}
+
+/**
+ * 镜像 zcode-cli config-factory 的会话级 MCP 文件解析（createSession 不下发
+ * mcpServers 时会话工具面的唯一来源）：
+ *   项目 .agents/mcp.json → 项目 .zcode/config.json →
+ *   用户 ~/.agents/mcp.json → 用户 ~/.zcode/cli/config.json（后写赢，user 盖 project）
+ * `.agents` 是 UI fallback 源（设置页可见的 server 会话里也该可用）；zcode 目录优先。
+ * `mcp.enabled === false` 全局关闭。返回值是 pi-shape servers map。
+ */
+export function loadFileMcpServers({ homeDir, workspacePath }) {
+  const out = {};
+  const collectZcode = (file) => {
+    const json = readJsonSafe(file);
+    if (json?.mcp?.enabled === false) return "disabled";
+    collectServers(out, json?.mcp?.servers);
+    return undefined;
+  };
+  const collectAgents = (file) => collectServers(out, readJsonSafe(file)?.mcpServers);
+  let disabled = false;
+  if (workspacePath) {
+    collectAgents(path.join(workspacePath, ".agents", "mcp.json"));
+    disabled = collectZcode(path.join(workspacePath, ".zcode", "config.json")) === "disabled";
+  }
+  collectAgents(path.join(homeDir, ".agents", "mcp.json"));
+  if (collectZcode(path.join(homeDir, ".zcode", "cli", "config.json")) === "disabled") {
+    disabled = true;
+  }
+  return disabled ? {} : out;
+}
+
 /** pi-rs get_mcp_status servers[] → ZCode mcp/list statuses record. */
 export function piStatusToZCodeStatuses(servers) {
   const statuses = {};

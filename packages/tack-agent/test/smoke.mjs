@@ -24,12 +24,22 @@ const pending = new Map();
 let nextId = 1;
 const frames = [];
 
+// bridge 的 HOME 隔进临时目录：zcode 配置文件解析（~/.zcode/cli/config.json）
+// 全程 hermetic，不读/不写真实用户目录。可用 TACK_SMOKE_HOME 固定位置调试。
+const bridgeHome =
+  process.env.TACK_SMOKE_HOME ?? fs.mkdtempSync(path.join(os.tmpdir(), "tack-smoke-home-"));
+const smokeAgentDir = process.env.PI_RS_AGENT_DIR ?? path.join(bridgeHome, ".pi-rs", "agent");
+
 let child;
 function startBridge() {
   buffer = "";
   child = spawn(process.execPath, [bridgeBin], {
     cwd: process.cwd(),
-    env: { ...process.env, TACK_AGENT_PI_BINARY: process.env.TACK_AGENT_PI_BINARY || "pi-rs" },
+    env: {
+      ...process.env,
+      HOME: bridgeHome,
+      TACK_AGENT_PI_BINARY: process.env.TACK_AGENT_PI_BINARY || "pi-rs",
+    },
     stdio: ["pipe", "pipe", "inherit"],
   });
   child.stdout.on("data", onChunk);
@@ -306,11 +316,39 @@ const mcpConvSub = await request("v4/conversation/subscribe", {
 });
 assert(mcpConvSub.result?.ack?.subscriptionId, "mcp session conversation subscribe ack");
 
-// 12. bridge 重启：磁盘留档让冷恢复会话的 MCP 重放（重启不丢工具面）
-const storeFile = path.join(
-  process.env.PI_RS_AGENT_DIR ?? path.join(os.homedir(), ".pi-rs", "agent"),
-  "tack-mcp-servers.json",
+// 12. mcp/list 不带 mcpServers：bridge 回落 zcode 配置文件解析（zcode-cli 语义）
+fs.mkdirSync(path.join(bridgeHome, ".zcode", "cli"), { recursive: true });
+fs.writeFileSync(
+  path.join(bridgeHome, ".zcode", "cli", "config.json"),
+  JSON.stringify({
+    mcp: {
+      servers: {
+        "smoke-mcp": {
+          type: "stdio",
+          command: process.execPath,
+          args: [mockServerPath],
+          env: {},
+          enabled: true,
+        },
+      },
+    },
+  }),
 );
+const mcpFileFallback = await request("mcp/list", {
+  workspace: { workspacePath: process.cwd(), workspaceKey: "smoke" },
+  mode: "connect",
+});
+assert(
+  mcpFileFallback.result?.statuses?.["smoke-mcp"]?.status === "connected",
+  `mcp/list 无参回落文件配置 (smoke-mcp ${mcpFileFallback.result?.statuses?.["smoke-mcp"]?.status ?? "missing"})`,
+);
+assert(
+  mcpFileFallback.result.statuses["smoke-mcp"].toolCount === 1,
+  "文件配置 server toolCount == 1",
+);
+
+// 13. bridge 重启：磁盘留档让冷恢复会话的 MCP 重放（重启不丢工具面）
+const storeFile = path.join(smokeAgentDir, "tack-mcp-servers.json");
 assert(fs.existsSync(storeFile), "tack-mcp-servers.json 留档已写入");
 const stored = JSON.parse(fs.readFileSync(storeFile, "utf8"));
 assert(

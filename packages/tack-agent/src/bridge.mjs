@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -23,7 +24,7 @@ import { encodeTopicWireFrames } from "./wire.mjs";
 import { AttachmentError, AttachmentStore } from "./attachments.mjs";
 import { agentDir } from "./piHome.mjs";
 import { loadSkills } from "./skills.mjs";
-import { McpProbePool, SessionMcpStore, protocolMcpServersToPi } from "./mcp.mjs";
+import { McpProbePool, SessionMcpStore, loadFileMcpServers, protocolMcpServersToPi } from "./mcp.mjs";
 
 const piProviders = JSON.parse(
   fs.readFileSync(
@@ -211,6 +212,19 @@ export class WorkspaceBridge {
       });
     }
     return this.#mcpProbePool;
+  }
+
+  /**
+   * 会话级生效 MCP 集 = zcode 配置文件解析（镜像 zcode-cli，每次新读，配置改动即生效）
+   * + host createSession.mcpServers 显式下发（同名覆盖，对应 CLI merge 的 cli 优先级）。
+   */
+  #effectiveSessionMcpServers(hostServers) {
+    const fileServers = loadFileMcpServers({
+      homeDir: os.homedir(),
+      workspacePath: this.#hostWorkspacePath ?? this.#cwd,
+    });
+    if (!hostServers) return fileServers;
+    return { ...fileServers, ...hostServers };
   }
 
   registerChildSession(parentSessionId, childSessionId) {
@@ -688,9 +702,11 @@ export class WorkspaceBridge {
     const task = SessionActor.resume({ bridge: this, workspace, sessionId, file })
       .then(async (actor) => {
         // 冷恢复（resubscribe / 超时重建）也要恢复会话的 MCP 工具面：host
-        // 只在 createSession 时下发一次，bridge 按 sessionId 留存并在 resume 时重放。
-        const mcpServers = this.#sessionMcpServers.get(actor.sessionId);
-        if (mcpServers) await actor.applyMcpServers(mcpServers);
+        // 显式下发的部分按留档重放，文件配置部分重新解析（与 zcode-cli resume 同语义）。
+        const mcpServers = this.#effectiveSessionMcpServers(
+          this.#sessionMcpServers.get(actor.sessionId),
+        );
+        if (Object.keys(mcpServers).length > 0) await actor.applyMcpServers(mcpServers);
         this.#actors.set(actor.sessionId, actor);
         this.#pendingActors.delete(sessionId);
         return actor;
@@ -843,9 +859,13 @@ export class WorkspaceBridge {
    * OAuth 轮询的只读路径（不触发连接/断开）。
    */
   async #handleMcpList(params) {
-    const servers = protocolMcpServersToPi(params.mcpServers);
-    const connect = (params.mode ?? "connect") !== "status";
     const workspacePath = params.workspace?.workspacePath ?? this.#cwd;
+    // host 显式下发优先；缺省回落 zcode 配置文件解析（zcode-cli mcp/list 的
+    // createConfig 语义：agent 自己读 mcp.servers）。
+    const servers =
+      protocolMcpServersToPi(params.mcpServers) ??
+      loadFileMcpServers({ homeDir: os.homedir(), workspacePath });
+    const connect = (params.mode ?? "connect") !== "status";
     try {
       const statuses = await this.#mcpProbes().status({ workspacePath, servers, connect });
       return { statuses };
@@ -946,16 +966,18 @@ export class WorkspaceBridge {
             workspaceKey: workspaceId,
           };
           // MCP 是 runtime 启动期配置（ZCode 协议注释）：必须随 create 一次性
-          // 进入会话，首发 prompt 之前注入 pi-rs。
-          const mcpServers = protocolMcpServersToPi(payload.mcpServers);
+          // 进入会话，首发 prompt 之前注入 pi-rs。host 显式下发的部分留档
+          // （冷恢复重放）；文件配置部分每次恢复时重新解析，不冻结。
+          const hostMcpServers = protocolMcpServersToPi(payload.mcpServers);
+          const mcpServers = this.#effectiveSessionMcpServers(hostMcpServers);
           const actor = await SessionActor.spawnNew({
             bridge: this,
             workspace,
             config: payload.config ?? {},
-            mcpServers,
+            mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : null,
           });
           this.#actors.set(actor.sessionId, actor);
-          if (mcpServers) this.#sessionMcpServers.set(actor.sessionId, mcpServers);
+          if (hostMcpServers) this.#sessionMcpServers.set(actor.sessionId, hostMcpServers);
           this.notifySessionChanged(actor);
           let input;
           if (payload.firstInput?.text) {
