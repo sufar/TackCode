@@ -98,8 +98,8 @@ opencode-go/zen→opencode-go/opencode）。
 
 ## 当前限制（bridge v0.1）
 
-- 权限确认交互未接通：pi-rs rpc 模式恒为 bypass（工具直接执行），
-  ZCode 的权限弹窗不会出现。后续可走 `pi-rs serve` 的 permission 通道。
+- 权限确认交互已接通（build/edit/plan/yolo → ask/acceptEdits/plan/bypass）：
+  弹窗、允许一次/项目范围允许/拒绝、超时与取消的清理都可用（pi-rs rpc `set_mode`）。
 - 图片/附件上传未实现（`v4/attachment/*` 返回 method-not-found）。
 - 工作流/动态工作流、Off-Peak 闲时、子代理下钻、文件回退预览：返回空或 method-not-found；
   `workspace/generateText` 已实现（一次性 pi-rs 无工具调用，供标题/提交信息生成）。

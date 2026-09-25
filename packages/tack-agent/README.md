@@ -43,7 +43,10 @@ ZCode
 - 存储启动握手：`--prepare-storage` 单发模式（startup/storagePath → storagePathReady →
   storageState → storagePrepared）+ 启动就绪上报
 - 反向请求：`interaction/requestProviderRuntimeHeaders`（按需向 host 取 API Key →
-  写入 pi-rs `auth.json`）
+  写入 pi-rs `auth.json`）、`interaction/requestPermission`（权限弹窗，声明式 options 回映）
+- 权限交互：`resolveInteraction` 命令结算（先到先得），映射到 pi 的
+  allow/allowAlways/deny；协作模式 build/edit/plan/yolo → pi `set_mode` 的
+  ask/acceptEdits/plan/bypass
 - 其余方法：`-32601 method not found`（host 对可选能力会降级）
 
 ## pi-rs 侧映射
