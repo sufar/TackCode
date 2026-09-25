@@ -225,6 +225,9 @@ export class SessionActor {
   pendingInteractions = [];
   #pendingPermissions = new Map(); // interactionId -> pending permission
   #backgroundWorks = []; // backgroundWorkSummarySchema[]
+  #queueItems = []; // queued follow_up intents (conversationInputIntentSchema[])
+  #admissionSeq = 0;
+  #autoDrain = true;
 
   constructor({ bridge, workspace, sessionId }) {
     this.#bridge = bridge;
@@ -484,6 +487,10 @@ export class SessionActor {
     this.#rowById.set(row.rowId, row);
   }
 
+  #queueState() {
+    return { items: this.#queueItems, autoDrain: this.#autoDrain };
+  }
+
   #subagentsProjection() {
     const rows = [...this.#subagentRows.values()];
     // runningSubagentSummarySchema requires childSessionId; foreground
@@ -586,12 +593,12 @@ export class SessionActor {
             revision: this.revision,
             control: this.control,
             availability: allAvailability(),
-            inputRouting: { mode: "startNow" },
+            inputRouting: this.streaming || this.compacting ? { mode: "enqueue" } : { mode: "startNow" },
             meta: this.meta,
             config: this.config,
             modelTransition: null,
             usage: this.usage,
-            queue: { items: [], autoDrain: true },
+            queue: this.#queueState(),
             pendingInteractions: this.pendingInteractions,
             pendingCommands: [],
             backgroundWorks: this.#backgroundWorks,
@@ -798,7 +805,7 @@ export class SessionActor {
 
   // ── commands ───────────────────────────────────────────────────────────
 
-  async sendText({ text, modelSelection, commandId, clientId, attachments }) {
+  async sendText({ text, modelSelection, commandId, clientId, attachments, requestedDelivery }) {
     if (this.#disposed) throw new Error("session is disposed");
     if (modelSelection) {
       await this.applyModelSelection(modelSelection, undefined, { persistMarker: false });
@@ -844,6 +851,34 @@ export class SessionActor {
       );
     }
     const fullText = `${text}${textParts.join("")}`;
+    const busy = this.streaming || this.compacting;
+    if (process.env.TACK_AGENT_DEBUG_QUEUE === "1") {
+      this.#bridge.log(`[debug] sendText busy=${busy} streaming=${this.streaming} turnOpen=${this.#turnOpen} delivery=${requestedDelivery}`);
+    }
+    // Busy admission: queue via pi follow_up (ZCode enqueue semantics).
+    if (busy && requestedDelivery !== "startNow") {
+      const queueItemId = randomUUID();
+      this.#admissionSeq += 1;
+      this.#queueItems.push({
+        sourceCommandId: commandId ?? queueItemId,
+        queueItemId,
+        clientId: clientId ?? "unknown",
+        kind: "sendText",
+        text: fullText,
+        attachments: attachmentMeta,
+        delivery: { requested: "auto", admitted: "queue" },
+        order: { admissionSeq: this.#admissionSeq, queuePosition: this.#queueItems.length },
+        steer: { state: "notRequested" },
+        dispatch: { state: "queued" },
+        admittedAt: at,
+      });
+      await this.#rpc.request("follow_up", { message: fullText }, { timeoutMs: 15_000 });
+      this.#emit([
+        this.#statePatch({ queue: this.#queueState(), inputRouting: { mode: "enqueue" } }),
+      ]);
+      this.#bridge.notifySessionChanged(this);
+      return { delivery: "queue" };
+    }
     if (!this.#turnOpen) {
       this.#turnId = randomUUID();
       this.#turnHadError = false;
@@ -1043,8 +1078,13 @@ export class SessionActor {
     this.#emit([this.#statePatch({ control: this.control })]);
     try {
       await this.#rpc.request("abort", {}, { timeoutMs: 10_000 });
+      await this.#rpc.request("clear_queue", {}, { timeoutMs: 10_000 });
     } catch (error) {
       this.#bridge.log(`[tack-agent] abort failed: ${error.message}`);
+    }
+    if (this.#queueItems.length > 0) {
+      this.#queueItems = [];
+      this.#emit([this.#statePatch({ queue: this.#queueState() })]);
     }
     // pi-rs normally winds the turn down with its own events; if it stays
     // silent, force the projection to interrupted so the UI never sticks.
@@ -1168,6 +1208,52 @@ export class SessionActor {
     }
   }
 
+  /** Queue operations: edit/delete/reorder via pi clear_queue + re-queue. */
+  async #requueue(remaining) {
+    try {
+      await this.#rpc.request("clear_queue", {}, { timeoutMs: 15_000 });
+    } catch (error) {
+      this.#bridge.log(`[tack-agent] clear_queue failed: ${error.message}`);
+    }
+    this.#queueItems = remaining;
+    for (const item of remaining) {
+      try {
+        await this.#rpc.request("follow_up", { message: item.text }, { timeoutMs: 15_000 });
+      } catch (error) {
+        this.#bridge.log(`[tack-agent] follow_up failed: ${error.message}`);
+      }
+    }
+    this.#emit([this.#statePatch({ queue: this.#queueState() })]);
+  }
+
+  async deleteQueueItem(queueItemId) {
+    await this.#requueue(this.#queueItems.filter((item) => item.queueItemId !== queueItemId));
+  }
+
+  async editQueueItem(queueItemId, newText) {
+    await this.#requueue(
+      this.#queueItems.map((item) =>
+        item.queueItemId === queueItemId ? { ...item, text: newText } : item,
+      ),
+    );
+  }
+
+  async reorderQueueItem(queueItemId, beforeQueueItemId) {
+    const item = this.#queueItems.find((entry) => entry.queueItemId === queueItemId);
+    if (!item) return;
+    const rest = this.#queueItems.filter((entry) => entry.queueItemId !== queueItemId);
+    const insertAt = beforeQueueItemId
+      ? rest.findIndex((entry) => entry.queueItemId === beforeQueueItemId)
+      : rest.length;
+    rest.splice(insertAt === -1 ? rest.length : insertAt, 0, item);
+    await this.#requueue(rest);
+  }
+
+  async setAutoDrain(autoDrain) {
+    this.#autoDrain = autoDrain === true;
+    this.#emit([this.#statePatch({ queue: this.#queueState() })]);
+  }
+
   async switchCollaborationMode(mode) {
     // Map to pi's SessionMode: permission prompts now gate tool calls.
     this.config = { ...this.config, mode };
@@ -1220,6 +1306,9 @@ export class SessionActor {
       case "turn_start":
         break;
       case "message_start":
+        if (event.message?.role === "user") {
+          this.#consumeQueuedInput(event.message);
+        }
         if (event.message?.role === "assistant") {
           this.#responseId = event.message.responseId ?? randomUUID();
         }
@@ -1379,6 +1468,62 @@ export class SessionActor {
       ...(row ? [{ op: "row.upserted", row }] : []),
       this.#statePatch({ pendingInteractions: this.pendingInteractions }),
     ]);
+  }
+
+  /** A queued follow_up just started: project its rows + drain the queue. */
+  #consumeQueuedInput(message) {
+    if (this.#queueItems.length === 0) return;
+    const text = typeof message?.content === "string" ? message.content : "";
+    const index = this.#queueItems.findIndex(
+      (item) => item.text === text || text.startsWith(item.text.slice(0, 40)),
+    );
+    if (index === -1) return;
+    const item = this.#queueItems[index];
+    this.#queueItems = this.#queueItems.filter((_, i) => i !== index);
+    this.#emit([this.#statePatch({ queue: this.#queueState() })]);
+    // Project the turn exactly like a fresh sendText admission.
+    const at = Date.now();
+    this.lastActivityAt = at;
+    if (!this.#turnOpen) {
+      this.#turnId = randomUUID();
+      this.#turnHadError = false;
+      this.#turnHeaderRow = this.#rowFactory.turnHeader({
+        turnId: this.#turnId,
+        state: "running",
+        at,
+        seq: this.seq + 1,
+        sourceCommandId: item.sourceCommandId,
+      });
+      this.#pushRow(this.#turnHeaderRow);
+      this.#turnOpen = true;
+      this.streaming = true;
+      this.control = {
+        phase: "running",
+        sessionEnded: false,
+        canStop: true,
+        stopState: "stoppable",
+        stopTargetKind: "unknown",
+        activeWorks: [{ kind: "primaryTurn", startedAt: at }],
+        lastError: null,
+        apiRetry: null,
+      };
+      this.#emit([
+        { op: "row.appended", row: this.#turnHeaderRow },
+        this.#statePatch({ control: this.control, inputRouting: { mode: "enqueue" } }),
+      ]);
+    }
+    const userRow = this.#rowFactory.userInput({
+      turnId: this.#turnId,
+      text: item.text,
+      at,
+      seq: this.seq + 1,
+      origin: "realUser",
+      sourceCommandId: item.sourceCommandId,
+      clientId: item.clientId,
+    });
+    if (item.attachments?.length > 0) userRow.attachments = item.attachments;
+    this.#pushRow(userRow);
+    this.#emit([{ op: "row.appended", row: userRow }]);
   }
 
   #handleAssistantEvent(event) {

@@ -934,20 +934,22 @@ export class WorkspaceBridge {
         case "sendText": {
           const actor = await this.#ensureActor(sessionId, workspaceId);
           const inputId = randomUUID();
-          actor
+          const sendResult = actor
             .sendText({
               text: payload.text ?? "",
               modelSelection: payload.modelSelection,
               attachments: payload.attachments,
+              requestedDelivery: payload.requestedDelivery,
               commandId,
               clientId: envelope.clientId,
             })
             .catch((error) => this.#log(`[tack-agent] sendText failed: ${error.message}`));
+          const { delivery = "startNow" } = (await sendResult) ?? {};
           return this.#recordAck(sessionId, {
             commandId,
             status: "accepted",
             revisionAtDecision: actor.revision,
-            result: { type: "inputAccepted", delivery: "startNow", inputId },
+            result: { type: "inputAccepted", delivery, inputId },
           });
         }
         case "stop": {
@@ -1088,6 +1090,59 @@ export class WorkspaceBridge {
             status: "accepted",
             revisionAtDecision: 0,
           });
+        case "deleteQueueItem": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          actor
+            .deleteQueueItem(payload.queueItemId ?? "")
+            .catch((error) => this.#log(`[tack-agent] deleteQueueItem failed: ${error.message}`));
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
+        case "editQueueItem": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          actor
+            .editQueueItem(payload.queueItemId ?? "", payload.newText ?? "")
+            .catch((error) => this.#log(`[tack-agent] editQueueItem failed: ${error.message}`));
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
+        case "reorderQueueItem": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          actor
+            .reorderQueueItem(payload.queueItemId ?? "", payload.beforeQueueItemId ?? null)
+            .catch((error) => this.#log(`[tack-agent] reorderQueueItem failed: ${error.message}`));
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
+        case "setAutoDrain": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          actor
+            .setAutoDrain(payload.autoDrain === true)
+            .catch((error) => this.#log(`[tack-agent] setAutoDrain failed: ${error.message}`));
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
+        case "sendQueuedNow": {
+          // pi runs follow_up at turn end; nothing extra to trigger.
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
         case "cancelBackgroundWork": {
           const actor = await this.#ensureActor(sessionId, workspaceId);
           actor
