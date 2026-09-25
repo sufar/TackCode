@@ -1,6 +1,8 @@
 // Smoke test: drives the bridge over stdio the same way the ZCode host does.
 // Usage: node test/smoke.mjs [--prompt "say hi"]
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,18 +19,24 @@ const modelArg = process.argv.includes("--model")
   : null;
 const modelSelection = providerArg && modelArg ? { providerId: providerArg, modelId: modelArg } : undefined;
 
-const child = spawn(process.execPath, [bridgeBin], {
-  cwd: process.cwd(),
-  env: { ...process.env, TACK_AGENT_PI_BINARY: process.env.TACK_AGENT_PI_BINARY || "pi-rs" },
-  stdio: ["pipe", "pipe", "inherit"],
-});
-
 let buffer = "";
 const pending = new Map();
 let nextId = 1;
 const frames = [];
 
-child.stdout.on("data", (chunk) => {
+let child;
+function startBridge() {
+  buffer = "";
+  child = spawn(process.execPath, [bridgeBin], {
+    cwd: process.cwd(),
+    env: { ...process.env, TACK_AGENT_PI_BINARY: process.env.TACK_AGENT_PI_BINARY || "pi-rs" },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  child.stdout.on("data", onChunk);
+  return child;
+}
+
+function onChunk(chunk) {
   buffer += chunk;
   let index;
   while ((index = buffer.indexOf("\n")) !== -1) {
@@ -53,7 +61,9 @@ child.stdout.on("data", (chunk) => {
       resolve(message);
     }
   }
-});
+}
+
+startBridge();
 
 function request(method, params) {
   const id = `smoke-${nextId++}`;
@@ -295,6 +305,37 @@ const mcpConvSub = await request("v4/conversation/subscribe", {
   clientMode: "desktop-continuous",
 });
 assert(mcpConvSub.result?.ack?.subscriptionId, "mcp session conversation subscribe ack");
+
+// 12. bridge 重启：磁盘留档让冷恢复会话的 MCP 重放（重启不丢工具面）
+const storeFile = path.join(
+  process.env.PI_RS_AGENT_DIR ?? path.join(os.homedir(), ".pi-rs", "agent"),
+  "tack-mcp-servers.json",
+);
+assert(fs.existsSync(storeFile), "tack-mcp-servers.json 留档已写入");
+const stored = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+assert(
+  stored[mcpSessionId]?.["smoke-mcp"]?.command === process.execPath,
+  "留档包含 mcp 会话的 server 配置",
+);
+await new Promise((resolve) => {
+  child.once("exit", resolve);
+  child.kill("SIGTERM");
+});
+await sleep(300);
+startBridge();
+await sleep(300);
+const framesBeforeRestart = frames.length;
+const resumeSub = await request("v4/conversation/subscribe", {
+  topic: `conversation/${mcpSessionId}`,
+  connectionId: "conn-2",
+  clientMode: "desktop-continuous",
+});
+assert(resumeSub.result?.ack?.subscriptionId, "重启后 resubscribe ack（resume + MCP 重放）");
+await sleep(400);
+const resumedSnapshot = frames
+  .slice(framesBeforeRestart)
+  .find((f) => f.topic === `conversation/${mcpSessionId}` && f.payload.kind === "snapshot");
+assert(resumedSnapshot, "重启后冷恢复 snapshot 帧");
 
 console.log("\nSMOKE PASS");
 child.kill("SIGTERM");

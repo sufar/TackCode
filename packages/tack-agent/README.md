@@ -33,8 +33,8 @@ ZCode
   deleteSession / switchModelConfig / switchCollaborationMode / setFollowupMode；
   其余返回 ACK failed(`unsupported.command`)
 - MCP：createSession.payload.mcpServers 随会话创建注入 pi-rs（`set_mcp_servers`，
-  bridge 按 sessionId 留档、冷恢复重放、fork 换键）；`mcp/list` 经共享 probe
-  pi-rs 进程真实连接并回写状态快照（mode=status 只读不连接）
+  bridge 磁盘留档 tack-mcp-servers.json：冷恢复/bridge 重启重放、fork 换键）；
+  `mcp/list` 经共享 probe pi-rs 进程真实连接并回写状态快照（mode=status 只读不连接）
 - 帧：`v4/conversation/frame`（snapshot + deltas），wire 封套 complete/fragment（crc32），
   deliveryKind = initial/online/recovery
 - 查询：`v4/commands/query`、`v4/conversation/rowsRange`、`v4/conversation/usage`、

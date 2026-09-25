@@ -23,7 +23,7 @@ import { encodeTopicWireFrames } from "./wire.mjs";
 import { AttachmentError, AttachmentStore } from "./attachments.mjs";
 import { agentDir } from "./piHome.mjs";
 import { loadSkills } from "./skills.mjs";
-import { McpProbePool, protocolMcpServersToPi } from "./mcp.mjs";
+import { McpProbePool, SessionMcpStore, protocolMcpServersToPi } from "./mcp.mjs";
 
 const piProviders = JSON.parse(
   fs.readFileSync(
@@ -175,7 +175,7 @@ export class WorkspaceBridge {
   #attachments;
   #childParentMap = new Map(); // childSessionId -> parentSessionId
   #skillsCache = null; // {at, entries} (30s TTL)
-  #sessionMcpServers = new Map(); // sessionId -> pi-shape servers map (host createSession.mcpServers)
+  #sessionMcpServers; // SessionMcpStore（磁盘留档，bridge 重启后冷恢复仍能重放）
   #mcpProbePool = null; // lazy McpProbePool for mcp/list
 
   constructor({ send, cwd, env, log }) {
@@ -184,6 +184,9 @@ export class WorkspaceBridge {
     this.#env = env;
     this.#log = log;
     this.#attachments = new AttachmentStore(agentDir(env));
+    this.#sessionMcpServers = new SessionMcpStore(
+      path.join(agentDir(env), "tack-mcp-servers.json"),
+    );
   }
 
   get attachments() {
@@ -219,8 +222,7 @@ export class WorkspaceBridge {
     this.#actors.delete(oldSessionId);
     // fork 出来的新会话继承同一 pi-rs 进程（MCP 规格仍在进程内），但 bridge
     // 侧的留档要换键，否则 fork 后的冷恢复会丢 MCP 重放。
-    const mcpServers = this.#sessionMcpServers.get(oldSessionId);
-    if (mcpServers) this.#sessionMcpServers.set(newSessionId, mcpServers);
+    this.#sessionMcpServers.rekey(oldSessionId, newSessionId);
     for (const subscriptionId of [...actor.subscriptionIds()]) {
       this.#dropSubscription(subscriptionId);
     }
@@ -1380,7 +1382,6 @@ export class WorkspaceBridge {
     this.#reversePending.clear();
     this.#mcpProbePool?.dispose();
     this.#mcpProbePool = null;
-    this.#sessionMcpServers.clear();
     await Promise.all([...this.#actors.values()].map((actor) => actor.dispose()));
   }
 }

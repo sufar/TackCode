@@ -1,7 +1,14 @@
 // Unit tests for the MCP translation layer (node --test test/mcp.test.mjs).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { piStatusToZCodeStatuses, protocolMcpServersToPi } from "../src/mcp.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  SessionMcpStore,
+  piStatusToZCodeStatuses,
+  protocolMcpServersToPi,
+} from "../src/mcp.mjs";
 
 test("protocolMcpServersToPi: non-array → null (host did not override)", () => {
   assert.equal(protocolMcpServersToPi(undefined), null);
@@ -96,4 +103,39 @@ test("piStatusToZCodeStatuses: unknown transport/status degrade safely", () => {
   ]);
   assert.equal(statuses.x.transport, "stdio");
   assert.equal(statuses.x.status, "disconnected");
+});
+
+test("SessionMcpStore: set → 重新加载 → get（bridge 重启重放路径）", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-store-"));
+  const file = path.join(dir, "tack-mcp-servers.json");
+  const servers = { "smoke-mcp": { command: "node", args: ["srv.mjs"], env: {} } };
+  const store = new SessionMcpStore(file);
+  store.set("session-1", servers);
+  // 模拟 bridge 重启：新实例从同一文件恢复。
+  const reloaded = new SessionMcpStore(file);
+  assert.deepEqual(reloaded.get("session-1"), servers);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("SessionMcpStore: delete 持久化 + rekey 换键", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-store-"));
+  const file = path.join(dir, "tack-mcp-servers.json");
+  const store = new SessionMcpStore(file);
+  store.set("a", { s: { command: "x", args: [], env: {} } });
+  store.rekey("a", "b"); // fork 换键：新 sessionId 继承配置
+  assert.ok(store.get("b"));
+  store.delete("a");
+  const reloaded = new SessionMcpStore(file);
+  assert.equal(reloaded.get("a"), undefined);
+  assert.ok(reloaded.get("b"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("SessionMcpStore: 损坏文件按空档处理（不 throw）", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tack-mcp-store-"));
+  const file = path.join(dir, "tack-mcp-servers.json");
+  fs.writeFileSync(file, "{not json");
+  const store = new SessionMcpStore(file);
+  assert.equal(store.get("anything"), undefined);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

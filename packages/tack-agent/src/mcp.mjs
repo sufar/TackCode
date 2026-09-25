@@ -4,6 +4,9 @@
 // - translate pi-rs `get_mcp_status` results into ZCode status snapshots;
 // - own the shared probe pi-rs processes used by `mcp/list` (workspace-level
 //   status checks have no session of their own).
+import fs from "node:fs";
+import path from "node:path";
+
 import { spawnPiRpc } from "./piRpc.mjs";
 
 function entriesToObject(entries) {
@@ -83,6 +86,72 @@ export function piStatusToZCodeStatuses(servers) {
     };
   }
   return statuses;
+}
+
+/**
+ * Write-through 持久化 host 各会话的 MCP 配置（agentDir/tack-mcp-servers.json）。
+ * ZCode 协议口径：MCP 是 runtime 启动期配置，随 createSession 一次性进入 record；
+ * bridge 重启/桌面 App 重启后的冷恢复（resume）按留档重放——host 不会在 v4
+ * resubscribe 时重发。文件损坏/读取失败一律按空档处理（会话仍有 pi 文件配置兜底）。
+ */
+const SESSION_MCP_STORE_LIMIT = 512;
+
+export class SessionMcpStore {
+  #file;
+  #map;
+
+  constructor(file) {
+    this.#file = file;
+    this.#map = new Map();
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (raw && typeof raw === "object") {
+        for (const [sessionId, servers] of Object.entries(raw)) {
+          if (typeof sessionId === "string" && servers && typeof servers === "object") {
+            this.#map.set(sessionId, servers);
+          }
+        }
+      }
+    } catch {
+      /* 缺文件/损坏 → 空档 */
+    }
+  }
+
+  get(sessionId) {
+    return this.#map.get(sessionId);
+  }
+
+  set(sessionId, servers) {
+    // Map 保持插入序；超限淘汰最老条目（正常路径 deleteSession 已清理）。
+    this.#map.delete(sessionId);
+    this.#map.set(sessionId, servers);
+    while (this.#map.size > SESSION_MCP_STORE_LIMIT) {
+      const oldest = this.#map.keys().next().value;
+      this.#map.delete(oldest);
+    }
+    this.#persist();
+  }
+
+  rekey(oldSessionId, newSessionId) {
+    const servers = this.#map.get(oldSessionId);
+    if (servers === undefined) return;
+    this.set(newSessionId, servers);
+  }
+
+  delete(sessionId) {
+    if (this.#map.delete(sessionId)) this.#persist();
+  }
+
+  #persist() {
+    try {
+      fs.mkdirSync(path.dirname(this.#file), { recursive: true });
+      const tmp = `${this.#file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.#map)));
+      fs.renameSync(tmp, this.#file);
+    } catch {
+      /* 留档失败不致命：内存态仍有效，仅本次 bridge 生命周期内可重放 */
+    }
+  }
 }
 
 /**
