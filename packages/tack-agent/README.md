@@ -60,6 +60,11 @@ ZCode
   数组转 map；oauth scope 字符串拆 scopes；clientSecret/isolation/timeoutMs 无 pi
   对应字段，丢弃）；pi-rs 侧按会话合并进连接池（同名覆盖文件配置），连接池与
   prompt 共享（fingerprint 失效自动重建，死连接剔除）
+  - **OAuth 远程 server 的授权绕行**：pi headless（rpc 模式）不弹浏览器，设置页对
+    OAuth server 只会看到 failed(401)。令牌缓存 `~/.pi-rs/agent/mcp-tokens.json`
+    按 **server 名**索引且全模式共享 → 在 `~/.pi-rs/agent/mcp.json` 配同名条目
+    （带 `"oauth": true`），跑一次 pi-rs TUI 完成浏览器授权，之后 TackCode 会话
+    自动命中缓存并续期。
 - pi 事件 → v4：text/thinking → assistantText/reasoning 行（row.delta 流式）；
   toolcall_* → toolCall 行（inputText 流式）；tool_execution_* → 行状态/输出；
   turn_end → turnHeader 终态；message_update error → control.lastError
