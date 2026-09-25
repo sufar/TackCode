@@ -22,6 +22,7 @@ import { SessionActor } from "./sessionActor.mjs";
 import { encodeTopicWireFrames } from "./wire.mjs";
 import { AttachmentError, AttachmentStore } from "./attachments.mjs";
 import { agentDir } from "./piHome.mjs";
+import { loadSkills } from "./skills.mjs";
 
 const piProviders = JSON.parse(
   fs.readFileSync(
@@ -172,6 +173,7 @@ export class WorkspaceBridge {
   #generateTextProcesses = new Map(); // operationId -> one-shot print-mode child
   #attachments;
   #childParentMap = new Map(); // childSessionId -> parentSessionId
+  #skillsCache = null; // {at, entries} (30s TTL)
 
   constructor({ send, cwd, env, log }) {
     this.#send = send;
@@ -183,6 +185,15 @@ export class WorkspaceBridge {
 
   get attachments() {
     return this.#attachments;
+  }
+
+  #skills() {
+    if (this.#skillsCache && Date.now() - this.#skillsCache.at < 30_000) {
+      return this.#skillsCache.entries;
+    }
+    const entries = loadSkills({ cwd: this.#cwd, agentDir: agentDir(this.#env) });
+    this.#skillsCache = { at: Date.now(), entries };
+    return entries;
   }
 
   registerChildSession(parentSessionId, childSessionId) {
@@ -595,7 +606,11 @@ export class WorkspaceBridge {
       logEpoch: state.logEpoch,
       config: {
         configOptions,
-        slashCommands: [],
+        slashCommands: this.#skills().map((skill) => ({
+          name: skill.name,
+          description: skill.description ?? "",
+          source: "custom",
+        })),
       },
     };
   }
@@ -740,6 +755,23 @@ export class WorkspaceBridge {
       }
       case "mcp/list":
         return { statuses: {} };
+      case "skills/referenceCatalog": {
+        const entries = this.#skills().map((skill) => ({
+          id: skill.name,
+          name: skill.name,
+          description: skill.description ?? "",
+          path: skill.path,
+          scope: skill.scope,
+          enabled: true,
+        }));
+        return {
+          authority: params?.sessionId && this.#actors.has(params.sessionId) ? "session" : "workspace",
+          skills: entries,
+        };
+      }
+      case "plugins/referenceCatalog":
+      case "plugins/referenceCatalogWithCategory":
+        return { authority: "workspace", plugins: [] };
       case "workspace/generateText":
         return this.#handleGenerateText(params ?? {});
       case "workspace/cancelGenerateText":
