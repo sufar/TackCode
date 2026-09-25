@@ -89,6 +89,22 @@ function getUserAgentsSkillRoot(): string {
   return join(resolveUserHomeDir(), ".agents", "skills");
 }
 
+/** pi-rs 工作区级技能目录（TackCode 的 agent 生态根，允许根目录裸 .md）。 */
+function getWorkspacePiSkillRoot(workspacePath: string): string {
+  return join(workspacePath, ".pi", "skills");
+}
+
+/** pi-rs 用户级技能目录：$PI_RS_AGENT_DIR/skills，缺省 ~/.pi-rs/agent/skills。 */
+function getUserPiAgentSkillRoot(): string {
+  const agentDir =
+    process.env.PI_RS_AGENT_DIR?.trim() || join(resolveUserHomeDir(), ".pi-rs", "agent");
+  return join(agentDir, "skills");
+}
+
+function isPiWorkspaceSkillRoot(rootPath: string): boolean {
+  return rootPath.replaceAll("\\", "/").endsWith("/.pi/skills");
+}
+
 function normalizeSkillNameKey(name: string): string {
   return name.trim().toLowerCase();
 }
@@ -159,6 +175,9 @@ async function resolveAncestorWorkspaceRoots(workspacePath: string): Promise<str
     // 就会整根漏掉 `.agents` 技能，形成“模型可执行但 UI 无法引用”的发现语义分裂。
     roots.push(getWorkspaceZcodeSkillRoot(dir));
     roots.push(getWorkspaceAgentsSkillRoot(dir));
+    // TackCode：pi-rs 的 `.pi/skills` 也是本产品的正式技能根（bridge/pi 同根扫描），
+    // 设置页不扫就会整面看不到 pi 生态技能。
+    roots.push(getWorkspacePiSkillRoot(dir));
   }
   return roots;
 }
@@ -588,6 +607,8 @@ interface SkillRootDescriptor {
   rootPath: string;
   pluginName?: string;
   pluginId?: string;
+  /** pi 生态的技能根允许根目录直接放裸 .md（pi load_skills includeRootFiles 语义）。 */
+  includeRootMarkdownFiles?: boolean;
 }
 
 interface PluginConfigSummary {
@@ -849,6 +870,7 @@ async function discoverSkills(params: {
   const roots: SkillRootDescriptor[] = workspaceRoots.map((rootPath) => ({
     scope: "workspace" as const,
     rootPath,
+    includeRootMarkdownFiles: isPiWorkspaceSkillRoot(rootPath),
   }));
   if (params.includeUserSkills) {
     // 用户级技能是全局资源，`.zcode/skills` 里只要存在一个技能就截断
@@ -860,6 +882,12 @@ async function discoverSkills(params: {
     roots.push({
       scope: "user" as const,
       rootPath: getUserAgentsSkillRoot(),
+    });
+    // TackCode：pi-rs agent 的用户级技能（~/.pi-rs/agent/skills 或 $PI_RS_AGENT_DIR/skills）。
+    roots.push({
+      scope: "user" as const,
+      rootPath: getUserPiAgentSkillRoot(),
+      includeRootMarkdownFiles: true,
     });
   }
   roots.push(...(await resolvePluginSkillRootDescriptors()));
@@ -882,7 +910,11 @@ async function discoverSkills(params: {
       continue;
     }
 
-    const skillPaths = await collectSkillMarkdownPaths(root.rootPath, diagnostics);
+    const skillPaths = await collectSkillMarkdownPaths(
+      root.rootPath,
+      diagnostics,
+      root.includeRootMarkdownFiles,
+    );
     for (const skillPath of skillPaths) {
       if (
         await isUserAgentsSkillCoveredByZcode({
@@ -987,6 +1019,7 @@ async function discoverSkills(params: {
 async function collectSkillMarkdownPaths(
   rootPath: string,
   diagnostics: SkillDiagnostic[],
+  includeRootMarkdownFiles = false,
 ): Promise<string[]> {
   // 复用共享的有界遍历：支持分组目录，但排除 node_modules 等内容目录、限制深度、对软链按 realpath 去重，
   // 避免 Windows junction / 巨型依赖目录把单次扫描放大到数十秒。
@@ -1002,6 +1035,21 @@ async function collectSkillMarkdownPaths(
     },
   })) {
     discovered.add(skillPath);
+  }
+  if (includeRootMarkdownFiles) {
+    // pi 生态的技能根允许根目录直接放裸 .md（walk 只产 SKILL.md）。
+    let entries;
+    try {
+      entries = await readdir(rootPath, { withFileTypes: true });
+    } catch {
+      entries = null;
+    }
+    if (entries) {
+      for (const entry of entries) {
+        if (entry.isDirectory() || !entry.name.endsWith(".md")) continue;
+        discovered.add(join(rootPath, entry.name));
+      }
+    }
   }
   return [...discovered].sort((left, right) => left.localeCompare(right));
 }

@@ -816,7 +816,9 @@ export class WorkspaceBridge {
         return this.#handleMcpList(params ?? {});
       case "skills/referenceCatalog": {
         const entries = this.#skills().map((skill) => ({
-          id: skill.name,
+          // `glm:` 前缀是 UI provider 过滤契约（skillSourceFilter），path 使同名
+          // 不同来源仍有稳定行身份——与 zcode-cli toReferenceCatalogEntry 逐字对齐。
+          id: `glm:${skill.scope}:${skill.path}`,
           name: skill.name,
           description: skill.description ?? "",
           path: skill.path,
