@@ -192,6 +192,19 @@ if (promptArg) {
   if (modelSelection) {
     assert(textDeltas.length > 0, "stream emitted assistant text deltas");
     console.log(`  streamed text: ${JSON.stringify(streamedText.slice(0, 120))}`);
+    // Regression: providers without text_end must still finalize with text.
+    const finalTextRows = [];
+    for (const f of newFrames) {
+      if (f.payload.kind !== "deltas") continue;
+      for (const d of f.payload.deltas) {
+        if (d.op === "row.upserted" && d.row.kind === "assistantText") finalTextRows.push(d.row);
+      }
+    }
+    const lastRow = finalTextRows.at(-1);
+    assert(
+      lastRow && lastRow.text && lastRow.text.length > 0,
+      `final assistantText row is non-empty (len=${lastRow?.text?.length ?? "missing"})`,
+    );
   }
   // seq continuity per frame
   let expected;

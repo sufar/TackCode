@@ -719,6 +719,9 @@ export class SessionActor {
       case "text_delta": {
         const row = this.#contentRows.get(slim.contentIndex);
         if (row) {
+          // Some providers never emit text_end (deepseek/anthropic-compat);
+          // the row must own its text, not just stream it.
+          row.text += slim.delta;
           this.#emit([{ op: "row.delta", rowId: row.rowId, path: "text", append: slim.delta }]);
         }
         break;
@@ -726,7 +729,9 @@ export class SessionActor {
       case "text_end": {
         const row = this.#contentRows.get(slim.contentIndex);
         if (row) {
-          row.text = slim.content ?? row.text;
+          // Providers without text_end leave us the accumulated deltas;
+          // when both exist, the fuller version wins.
+          row.text = (slim.content?.length ?? 0) > row.text.length ? slim.content : row.text;
           row.state = "complete";
           this.#contentRows.delete(slim.contentIndex);
           this.#emit([{ op: "row.upserted", row }]);
@@ -749,6 +754,7 @@ export class SessionActor {
       case "thinking_delta": {
         const row = this.#contentRows.get(slim.contentIndex);
         if (row) {
+          row.text += slim.delta;
           this.#emit([{ op: "row.delta", rowId: row.rowId, path: "text", append: slim.delta }]);
         }
         break;
@@ -756,7 +762,7 @@ export class SessionActor {
       case "thinking_end": {
         const row = this.#contentRows.get(slim.contentIndex);
         if (row) {
-          row.text = slim.content ?? row.text;
+          row.text = (slim.content?.length ?? 0) > row.text.length ? slim.content : row.text;
           row.state = "complete";
           this.#contentRows.delete(slim.contentIndex);
           this.#emit([{ op: "row.upserted", row }]);
@@ -782,6 +788,7 @@ export class SessionActor {
       case "toolcall_delta": {
         const row = this.#contentRows.get(slim.contentIndex);
         if (row) {
+          row.inputText += slim.delta;
           this.#emit([
             { op: "row.delta", rowId: row.rowId, path: "inputText", append: slim.delta },
           ]);
@@ -839,8 +846,33 @@ export class SessionActor {
 
   #finalizeStreamingRows(message) {
     const ops = [];
+    // Fill any still-empty streaming rows from the final assistant message's
+    // content blocks (providers that skip text_end/thinking_end entirely).
+    const textBlocks = [];
+    const thinkingBlocks = [];
+    if (message && Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block?.type === "text" && block.text) textBlocks.push(block.text);
+        if (block?.type === "thinking" && block.thinking) thinkingBlocks.push(block.thinking);
+      }
+    }
+    let textCursor = 0;
+    let thinkingCursor = 0;
     for (const [index, row] of this.#contentRows) {
-      if (row.state !== "streaming") continue;
+      if (row.state !== "streaming") {
+        this.#contentRows.delete(index);
+        continue;
+      }
+      if (!row.text) {
+        if (row.kind === "assistantText" && textCursor < textBlocks.length) {
+          row.text = textBlocks[textCursor++];
+        } else if (row.kind === "reasoning" && thinkingCursor < thinkingBlocks.length) {
+          row.text = thinkingBlocks[thinkingCursor++];
+        }
+      } else {
+        if (row.kind === "assistantText") textCursor++;
+        if (row.kind === "reasoning") thinkingCursor++;
+      }
       row.state = "complete";
       ops.push({ op: "row.upserted", row });
       this.#contentRows.delete(index);
