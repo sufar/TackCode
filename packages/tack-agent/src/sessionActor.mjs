@@ -224,6 +224,7 @@ export class SessionActor {
   firstUserText = null;
   pendingInteractions = [];
   #pendingPermissions = new Map(); // interactionId -> pending permission
+  #backgroundWorks = []; // backgroundWorkSummarySchema[]
 
   constructor({ bridge, workspace, sessionId }) {
     this.#bridge = bridge;
@@ -593,7 +594,7 @@ export class SessionActor {
             queue: { items: [], autoDrain: true },
             pendingInteractions: this.pendingInteractions,
             pendingCommands: [],
-            backgroundWorks: [],
+            backgroundWorks: this.#backgroundWorks,
             subagents: this.#subagentsProjection(),
             goal: null,
             plan: null,
@@ -1255,6 +1256,9 @@ export class SessionActor {
       case "permission_resolved":
         this.#handlePermissionResolved(event);
         break;
+      case "background_task":
+        this.#handleBackgroundTaskEvent(event);
+        break;
       default:
         break;
     }
@@ -1592,6 +1596,9 @@ export class SessionActor {
 
   #handleToolExecutionStart(event) {
     const row = this.#toolRows.get(event.toolCallId);
+    if (row && event.toolName === "bash" && event.args?.run_in_background === true) {
+      row.backgrounded = true;
+    }
     if (event.toolName === "subagent") {
       const args = event.args ?? {};
       const subRow = this.#rowFactory.subagent({
@@ -1652,7 +1659,104 @@ export class SessionActor {
     if (event.isError) {
       row.error = { code: "tool_error", message: previewText(text) ?? "tool failed" };
     }
+    if (row.backgrounded && event.toolName === "bash") {
+      void this.#trackBackgroundBash(row, event.args ?? {}, event.result?.details ?? {});
+    }
     this.#emit([{ op: "row.upserted", row }]);
+  }
+
+  /** bash run_in_background handoff -> backgroundWorks projection entry. */
+  async #trackBackgroundBash(row, args, details) {
+    const command = args.command ?? "";
+    let workId = details.taskId;
+    if (!workId) {
+      try {
+        const tasks = await this.#rpc.request("bash_tasks", {}, { timeoutMs: 15_000 });
+        const candidates = (Array.isArray(tasks) ? tasks : []).filter(
+          (task) => task?.command === command,
+        );
+        workId =
+          candidates.find((task) => task.running)?.taskId ?? candidates.at(-1)?.taskId;
+      } catch (error) {
+        this.#bridge.log(`[tack-agent] bash_tasks failed: ${error.message}`);
+      }
+    }
+    if (!workId) return;
+    row.workId = workId;
+    const title = (args.command || row.input?.command || "bash").slice(0, 80);
+    this.#backgroundWorks = [
+      ...this.#backgroundWorks.filter((work) => work.workId !== workId),
+      {
+        workId,
+        kind: "bash",
+        title: title || "bash",
+        status: "running",
+        startedAt: row.startedAt ?? Date.now(),
+        cancellable: true,
+        anchorRowId: row.rowId,
+      },
+    ];
+    this.#emit([
+      { op: "row.upserted", row },
+      this.#statePatch({ backgroundWorks: this.#backgroundWorks }),
+    ]);
+  }
+
+  #handleBackgroundTaskEvent(event) {
+    const work = this.#backgroundWorks.find((item) => item.workId === event.taskId);
+    if (!work) return;
+    work.status = "resultPending";
+    work.endedAt = Date.now();
+    work.cancellable = false;
+    this.#emit([this.#statePatch({ backgroundWorks: this.#backgroundWorks })]);
+  }
+
+  async cancelBackgroundWork(workId) {
+    try {
+      await this.#rpc.request("kill_shell", { taskId: workId }, { timeoutMs: 15_000 });
+    } catch (error) {
+      this.#bridge.log(`[tack-agent] kill_shell failed: ${error.message}`);
+    }
+    const work = this.#backgroundWorks.find((item) => item.workId === workId);
+    if (work) {
+      work.status = "cancelled";
+      work.endedAt = Date.now();
+      work.cancellable = false;
+      this.#emit([this.#statePatch({ backgroundWorks: this.#backgroundWorks })]);
+    }
+  }
+
+  async backgroundBashOutput(workId) {
+    try {
+      const snapshot = await this.#rpc.request(
+        "bash_output",
+        { taskId: workId },
+        { timeoutMs: 15_000 },
+      );
+      const statusMap = {
+        running: "running",
+        exited: "completed",
+        failed: "failed",
+        killed: "cancelled",
+        cancelled: "cancelled",
+      };
+      const rawStatus = String(snapshot?.status ?? "").toLowerCase();
+      const status =
+        Object.entries(statusMap).find(([key]) => rawStatus.startsWith(key))?.[1] ??
+        (rawStatus.includes("exit") ? "completed" : "failed");
+      const output = typeof snapshot?.output === "string" ? snapshot.output : "";
+      const truncated = output.length > 8192;
+      return {
+        kind: "output",
+        workId,
+        status,
+        output: truncated ? output.slice(-8192) : output,
+        truncated,
+        outputPath: snapshot?.outputPath ?? `/tmp/${workId}.log`,
+      };
+    } catch {
+      return { kind: "unavailable", workId };
+    }
   }
 
   #finishTurn(state, ops = []) {
@@ -1678,6 +1782,15 @@ export class SessionActor {
   }
 
   #handleTurnEnd() {
+    // Background results pending are considered delivered once the model
+    // finishes the turn that follows them.
+    const delivered = this.#backgroundWorks.filter((work) => work.status === "resultPending");
+    if (delivered.length > 0) {
+      this.#backgroundWorks = this.#backgroundWorks.filter(
+        (work) => work.status !== "resultPending",
+      );
+      this.#emit([this.#statePatch({ backgroundWorks: this.#backgroundWorks })]);
+    }
     if (!this.#turnOpen) return;
     this.#finishTurn(this.#turnHadError ? "failed" : "completedSuccess");
   }

@@ -705,6 +705,10 @@ export class WorkspaceBridge {
         return { runs: [] };
       case "v4/conversation/workflowRunEvents":
         return { events: [], hasMore: false };
+      case "v4/conversation/backgroundBashOutput": {
+        const actor = await this.#ensureActor(params?.sessionId, undefined);
+        return actor.backgroundBashOutput(params?.workId ?? "");
+      }
       case "v4/connection/flow":
         return {};
       case "v4/attachment/begin":
@@ -1084,6 +1088,17 @@ export class WorkspaceBridge {
             status: "accepted",
             revisionAtDecision: 0,
           });
+        case "cancelBackgroundWork": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          actor
+            .cancelBackgroundWork(payload.workId ?? "")
+            .catch((error) => this.#log(`[tack-agent] cancelBackgroundWork failed: ${error.message}`));
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
         case "resolveInteraction": {
           const actor = await this.#ensureActor(sessionId, workspaceId);
           const outcome = await actor.resolveInteractionCommand(
