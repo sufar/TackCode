@@ -4,6 +4,7 @@
 // sessions-index / workspace-config topics, routes conversation topics to
 // SessionActors, and brokers provider credentials from host to pi-rs.
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +59,94 @@ function methodNotFound(method) {
   return new ProtocolError(ERROR_METHOD_NOT_FOUND, `Method not found: ${method}`);
 }
 
+function flattenGenerateMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return "";
+  const system = [];
+  const turns = [];
+  for (const message of messages) {
+    if (message.role === "system") system.push(message.content ?? "");
+    else if (message.role === "user") turns.push(`User: ${message.content ?? ""}`);
+    else if (message.role === "assistant") turns.push(`Assistant: ${message.content ?? ""}`);
+    else if (message.role === "tool") turns.push(`Tool (${message.toolName ?? "result"}): ${message.content ?? ""}`);
+  }
+  return [...(system.length ? [system.join("\n\n")] : []), turns.join("\n\n")]
+    .filter((part) => part.length > 0)
+    .join("\n\n");
+}
+
+function assistantContentText(content) {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block) => block && block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("");
+}
+
+/** Drain a `pi-rs -p ... --mode json` child into {text, usage, finishReason, errorMessage}. */
+function collectPrintModeResult(child, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    let stderr = "";
+    let text = "";
+    let usage = null;
+    let finishReason;
+    let errorMessage;
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("generateText timed out"));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      let index;
+      while ((index = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === "message_end" && event.message?.role === "assistant") {
+            const next = assistantContentText(event.message.content);
+            if (next) text = next;
+            usage = event.message.usage ?? usage;
+            finishReason = event.message.rawStopReason ?? event.message.stopReason ?? finishReason;
+            if (event.message.errorMessage) errorMessage = event.message.errorMessage;
+          }
+        } catch {
+          /* non-json line */
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-4096);
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code !== 0 && !text && !errorMessage) {
+        reject(new Error(`pi-rs print mode exited ${code}: ${stderr.slice(-400)}`));
+        return;
+      }
+      resolve({
+        text,
+        usage: usage
+          ? {
+              inputTokens: usage.input ?? 0,
+              outputTokens: usage.output ?? 0,
+              totalTokens: usage.totalTokens ?? 0,
+              cacheReadTokens: usage.cacheRead ?? 0,
+              cacheWriteTokens: usage.cacheWrite ?? 0,
+            }
+          : undefined,
+        finishReason,
+        errorMessage,
+      });
+    });
+  });
+}
+
 export class WorkspaceBridge {
   #send;
   #log;
@@ -78,6 +167,7 @@ export class WorkspaceBridge {
   #reverseNextId = 1;
   #disposed = false;
   #hostWorkspacePath = null;
+  #generateTextProcesses = new Map(); // operationId -> one-shot print-mode child
 
   constructor({ send, cwd, env, log }) {
     this.#send = send;
@@ -607,6 +697,10 @@ export class WorkspaceBridge {
       }
       case "mcp/list":
         return { statuses: {} };
+      case "workspace/generateText":
+        return this.#handleGenerateText(params ?? {});
+      case "workspace/cancelGenerateText":
+        return this.#handleCancelGenerateText(params ?? {});
       case "session/read": {
         const actor = await this.#ensureActor(params?.sessionId, undefined);
         return actor.legacySnapshot({ messageLimit: params?.messageLimit });
@@ -904,6 +998,63 @@ export class WorkspaceBridge {
       providerCount,
       status: "received",
     };
+  }
+
+  // ── workspace/generateText: one-shot pi-rs print-mode call ──────────────
+
+  async #handleGenerateText(params) {
+    const selection = params.selection;
+    if (!selection?.providerId || !selection?.modelId) {
+      throw new ProtocolError(ERROR_INVALID_PARAMS, "selection is required");
+    }
+    const promptText = params.prompt ?? flattenGenerateMessages(params.messages);
+    if (!promptText) {
+      throw new ProtocolError(ERROR_INVALID_PARAMS, "prompt or messages is required");
+    }
+    const providerId = this.toPiProviderId(selection.providerId);
+    await this.ensureProviderAuth(providerId, {
+      workspace: params.workspace,
+      modelSelection: { providerId, modelId: selection.modelId },
+    });
+    const args = ["-p", promptText, "--no-tools", "--mode", "json"];
+    args.push("--provider", providerId, "--model", selection.modelId);
+    if (selection.options?.reasoningLevel) {
+      args.push("--thinking", selection.options.reasoningLevel);
+    }
+    const child = spawn(this.piBinary, args, {
+      cwd: params.workspace?.workspacePath ?? this.#cwd,
+      env: this.piSpawnEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const operationId = params.operationId ?? randomUUID();
+    if (params.operationId) this.#generateTextProcesses.set(operationId, child);
+    try {
+      const result = await collectPrintModeResult(child, 180_000);
+      if (result.errorMessage) {
+        throw new ProtocolError(ERROR_INTERNAL, result.errorMessage);
+      }
+      if (!result.text) {
+        throw new ProtocolError(ERROR_INTERNAL, "empty generation result");
+      }
+      return {
+        text: result.text,
+        selection,
+        ...(result.finishReason ? { finishReason: result.finishReason } : {}),
+        usage: result.usage,
+      };
+    } finally {
+      this.#generateTextProcesses.delete(operationId);
+    }
+  }
+
+  #handleCancelGenerateText(params) {
+    const child = this.#generateTextProcesses.get(params?.operationId);
+    if (child) {
+      this.#generateTextProcesses.delete(params.operationId);
+      child.kill("SIGTERM");
+      return { operationId: params.operationId, cancelled: true };
+    }
+    return { operationId: params?.operationId ?? "", cancelled: false };
   }
 
   async #handleLegacySetModel(params) {
