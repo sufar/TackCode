@@ -589,6 +589,10 @@ export class WorkspaceBridge {
       }
       case "mcp/list":
         return { statuses: {} };
+      case "session/read": {
+        const actor = await this.#ensureActor(params?.sessionId, undefined);
+        return actor.legacySnapshot({ messageLimit: params?.messageLimit });
+      }
       case "session/close":
       case "session/goal":
         return {};

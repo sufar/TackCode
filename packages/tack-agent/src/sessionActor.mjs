@@ -24,6 +24,35 @@ const IDLE_CONTROL = {
   apiRetry: null,
 };
 
+/** Map a v4 toolCall row to a legacy zcodeToolStateSchema state. */
+function legacyToolState(row) {
+  const startedAt = row.startedAt ?? row.createdAt;
+  if (row.status === "success") {
+    return {
+      status: "completed",
+      input: row.input ?? {},
+      output: row.output?.text ?? "",
+      title: row.toolName,
+      metadata: {},
+      startedAt,
+      completedAt: row.endedAt ?? startedAt,
+    };
+  }
+  if (row.status === "error" || row.status === "cancelled") {
+    return {
+      status: "error",
+      input: row.input ?? {},
+      error: row.error?.message ?? row.output?.text ?? "tool failed",
+      startedAt,
+      completedAt: row.endedAt ?? startedAt,
+    };
+  }
+  if (row.status === "running") {
+    return { status: "running", input: row.input ?? {}, title: row.toolName, startedAt };
+  }
+  return { status: "pending", input: row.input ?? {}, raw: row.inputText ?? "" };
+}
+
 function allAvailability() {
   const allowed = { allowed: true };
   return {
@@ -63,8 +92,6 @@ export class SessionActor {
   #turnHadError = false;
   #responseId = null;
   #assistantUsageSeen = null;
-
-  createdAt;
   lastActivityAt;
   meta = { title: "", titleSource: "default" };
   config = {
@@ -433,6 +460,171 @@ export class SessionActor {
       atLogEpoch: this.logEpoch,
       hasMore: start > 0,
     };
+  }
+
+  /**
+   * Legacy `session/read` snapshot (zcodeSessionStateSnapshotSchema). The
+   * task-index syncer resyncs task rows from this shape; keep it faithful.
+   */
+  legacySnapshot({ messageLimit } = {}) {
+    const statusMap = {
+      draft: "idle",
+      prewarming: "running",
+      running: "running",
+      completedSuccess: "completed",
+      completedInterrupted: "completed",
+      error: "error",
+    };
+    const status = statusMap[this.control.phase] ?? "idle";
+    const modelSelection =
+      this.config.provider && this.config.model
+        ? { providerId: this.config.provider, modelId: this.config.model }
+        : undefined;
+    const contextUsed = this.usage.contextWindow?.usedTokens ?? 0;
+    const contextWindow = this.usage.contextWindow?.maxTokens ?? this.modelContextWindow ?? 0;
+    const mode = this.config.mode ?? "build";
+    const titleSource =
+      this.meta.titleSource === "custom"
+        ? "custom"
+        : this.meta.titleSource === "generated"
+          ? "generated"
+          : this.firstUserText
+            ? "first_input"
+            : "default";
+    const lastError = this.control.lastError;
+    return {
+      protocol: { name: "ZCode Protocol", version: 1 },
+      session: {
+        sessionId: this.sessionId,
+        workspace: {
+          workspacePath: this.#workspace.workspacePath,
+          workspaceKey: this.#workspace.workspaceKey,
+        },
+        sessionKind: "interactive",
+        title: this.meta.title || "",
+        titleSource,
+        mode,
+        status,
+        ...(modelSelection ? { model: modelSelection } : {}),
+        createdAt: this.createdAt,
+        updatedAt: this.lastActivityAt,
+      },
+      settings: {
+        model: {
+          ...(modelSelection ? { current: modelSelection, lastUsed: modelSelection } : {}),
+          available: [],
+        },
+        thoughtLevel: {
+          enabled: this.config.thoughtLevels.length > 0,
+          ...(this.config.thought ? { current: this.config.thought } : {}),
+          available: this.config.thoughtLevels.map((level) => ({ value: level, label: level })),
+        },
+        mode: { current: mode },
+      },
+      projection: {
+        sessionId: this.sessionId,
+        status,
+        mode,
+        turnCount: this.rows.filter((row) => row.kind === "turnHeader").length,
+        totalTokenCount:
+          this.usage.cumulative.inputTokens + this.usage.cumulative.outputTokens,
+        contextUsed,
+        contextWindow,
+        ...(this.streaming && this.#turnId ? { currentTurnId: this.#turnId } : {}),
+        pendingPermissions: [],
+        activeToolCalls: [],
+        backgroundJobs: [],
+        ...(lastError
+          ? {
+              lastError: {
+                type: lastError.code ?? "error",
+                ...(lastError.code ? { code: lastError.code } : {}),
+                message: lastError.message,
+              },
+            }
+          : {}),
+      },
+      runtime: {
+        eventSeq: this.seq,
+        stateRevision: this.revision,
+        pendingRequestIds: [],
+        contextUsage: { used: contextUsed, size: Math.max(1, contextWindow) },
+      },
+      messages: this.#buildLegacyMessages(messageLimit),
+      slashCommands: [],
+    };
+  }
+
+  #buildLegacyMessages(messageLimit) {
+    const messages = [];
+    let lastUserMessageId = null;
+    let turnRows = [];
+    const flushTurn = () => {
+      if (turnRows.length === 0) return;
+      const first = turnRows[0];
+      const last = turnRows[turnRows.length - 1];
+      const messageId = `a-${first.rowId}`;
+      const parts = [];
+      for (const row of turnRows) {
+        const partBase = { partId: `p-${row.rowId}`, sessionId: this.sessionId, messageId };
+        if (row.kind === "assistantText") {
+          parts.push({ ...partBase, type: "text", text: row.text });
+        } else if (row.kind === "reasoning") {
+          parts.push({ ...partBase, type: "reasoning", text: row.text });
+        } else if (row.kind === "toolCall") {
+          parts.push({ ...partBase, type: "tool", callId: row.toolCallId, tool: row.toolName, state: legacyToolState(row) });
+        }
+      }
+      const completed = turnRows.every((row) => row.kind !== "toolCall" || ["success", "error", "cancelled"].includes(row.status)) && turnRows.every((row) => row.state !== "streaming");
+      messages.push({
+        info: {
+          messageId,
+          sessionId: this.sessionId,
+          role: "assistant",
+          time: {
+            created: first.createdAt,
+            ...(completed ? { completed: last.createdAt } : {}),
+          },
+          parentMessageId: lastUserMessageId ?? `u-0`,
+          agent: "pi-rs",
+          path: { cwd: this.#workspace.workspacePath, root: this.#workspace.workspacePath },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          ...(completed ? { finish: "stop" } : {}),
+        },
+        parts,
+      });
+      turnRows = [];
+    };
+    for (const row of this.rows) {
+      if (row.kind === "userInput") {
+        flushTurn();
+        const messageId = `u-${row.rowId}`;
+        lastUserMessageId = messageId;
+        messages.push({
+          info: {
+            messageId,
+            sessionId: this.sessionId,
+            role: "user",
+            time: { created: row.createdAt },
+            agent: "pi-rs",
+          },
+          parts: [
+            { partId: `p-${row.rowId}`, sessionId: this.sessionId, messageId, type: "text", text: row.text },
+          ],
+        });
+        continue;
+      }
+      if (row.kind === "assistantText" || row.kind === "reasoning" || row.kind === "toolCall") {
+        if (turnRows.length > 0 && turnRows[0].turnId !== row.turnId) flushTurn();
+        turnRows.push(row);
+      }
+    }
+    flushTurn();
+    if (typeof messageLimit === "number" && messageLimit > 0) {
+      return messages.slice(-messageLimit);
+    }
+    return messages;
   }
 
   // ── commands ───────────────────────────────────────────────────────────
