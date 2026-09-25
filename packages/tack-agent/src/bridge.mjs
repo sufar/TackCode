@@ -20,6 +20,8 @@ import {
 import { previewText } from "./projection.mjs";
 import { SessionActor } from "./sessionActor.mjs";
 import { encodeTopicWireFrames } from "./wire.mjs";
+import { AttachmentError, AttachmentStore } from "./attachments.mjs";
+import { agentDir } from "./piHome.mjs";
 
 const piProviders = JSON.parse(
   fs.readFileSync(
@@ -168,12 +170,29 @@ export class WorkspaceBridge {
   #disposed = false;
   #hostWorkspacePath = null;
   #generateTextProcesses = new Map(); // operationId -> one-shot print-mode child
+  #attachments;
 
   constructor({ send, cwd, env, log }) {
     this.#send = send;
     this.#cwd = cwd;
     this.#env = env;
     this.#log = log;
+    this.#attachments = new AttachmentStore(agentDir(env));
+  }
+
+  get attachments() {
+    return this.#attachments;
+  }
+
+  #withAttachmentError(run) {
+    try {
+      return run();
+    } catch (error) {
+      if (error instanceof AttachmentError) {
+        throw new ProtocolError(ERROR_INVALID_PARAMS, error.message);
+      }
+      throw error;
+    }
   }
 
   get piBinary() {
@@ -649,6 +668,21 @@ export class WorkspaceBridge {
         return { events: [], hasMore: false };
       case "v4/connection/flow":
         return {};
+      case "v4/attachment/begin":
+        return this.#withAttachmentError(() => this.#attachments.begin(params ?? {}));
+      case "v4/attachment/chunk":
+        return this.#withAttachmentError(() => this.#attachments.chunk(params ?? {}));
+      case "v4/attachment/commit":
+        return this.#withAttachmentError(() => this.#attachments.commit(params ?? {}));
+      case "v4/attachment/abort":
+        return this.#withAttachmentError(() => this.#attachments.abort(params ?? {}));
+      case "v4/attachment/read":
+      case "v4/conversation/attachmentRead":
+        return this.#withAttachmentError(() => this.#attachments.read(params ?? {}));
+      case "v4/conversation/attachmentStat":
+        return this.#withAttachmentError(() => this.#attachments.stat(params ?? {}));
+      case "v4/attachment/previewSource":
+        return { kind: "chunked" };
 
       // ── legacy workspace/config family ──
       case "workspace/readPresentation":
@@ -824,6 +858,7 @@ export class WorkspaceBridge {
               .sendText({
                 text: payload.firstInput.text,
                 modelSelection: payload.firstInput.modelSelection,
+                attachments: payload.firstInput.attachments,
                 commandId,
                 clientId: envelope.clientId,
               })
@@ -843,6 +878,7 @@ export class WorkspaceBridge {
             .sendText({
               text: payload.text ?? "",
               modelSelection: payload.modelSelection,
+              attachments: payload.attachments,
               commandId,
               clientId: envelope.clientId,
             })

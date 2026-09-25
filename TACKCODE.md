@@ -100,7 +100,8 @@ opencode-go/zen→opencode-go/opencode）。
 
 - 权限确认交互已接通（build/edit/plan/yolo → ask/acceptEdits/plan/bypass）：
   弹窗、允许一次/项目范围允许/拒绝、超时与取消的清理都可用（pi-rs rpc `set_mode`）。
-- 图片/附件上传未实现（`v4/attachment/*` 返回 method-not-found）。
+- 图片/附件已可用：v4 分块上传事务（begin/chunk/commit/abort，sha256 校验、落盘持久化）、
+  图片随 prompt 进模型（pi-rs rpc `images`）、附件预览读取、文本小文件内联、历史图片回填。
 - 工作流/动态工作流、Off-Peak 闲时、子代理下钻、文件回退预览：返回空或 method-not-found；
   `workspace/generateText` 已实现（一次性 pi-rs 无工具调用，供标题/提交信息生成）。
 - 排队语义简化：会话 busy 时发送按 pi-rs 的 steer 处理（注入当前轮），不是 ZCode 的队列模型。

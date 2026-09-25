@@ -93,6 +93,24 @@ function riskLevelForTool(toolName) {
   return "low";
 }
 
+const INLINE_TEXT_MIMES = new Set([
+  "application/json",
+  "application/xml",
+  "application/javascript",
+  "application/typescript",
+  "application/x-yaml",
+  "application/yaml",
+  "application/toml",
+  "application/x-sh",
+  "application/sql",
+]);
+
+function isInlineTextMime(mime) {
+  if (typeof mime !== "string") return false;
+  if (mime.startsWith("text/")) return true;
+  return INLINE_TEXT_MIMES.has(mime.split(";", 1)[0].trim().toLowerCase());
+}
+
 /** ZCodePermissionResponse -> pi permission_response payload. */
 function zcodeResponseToPiDecision(response) {
   if (
@@ -302,7 +320,7 @@ export class SessionActor {
       if (message.role === "system") continue;
       if (message.role === "user") {
         const text = textOf(message.content);
-        if (!text) continue;
+        if (!text && !Array.isArray(message.content)) continue;
         turnCounter += 1;
         currentTurnId = `turn-${turnCounter}`;
         this.#pushRow(
@@ -320,6 +338,25 @@ export class SessionActor {
           seq: bumpSeq(),
           origin: "realUser",
         });
+        // Rehydrate attached images from persisted content blocks.
+        if (Array.isArray(message.content)) {
+          const attachments = [];
+          for (const block of message.content) {
+            if (block?.type === "image" && block.data) {
+              const entry = this.#bridge.attachments.registerBytes(
+                Buffer.from(block.data, "base64"),
+                { fileName: `image.${(block.mimeType ?? "image/png").split("/")[1] ?? "png"}`, mime: block.mimeType ?? "image/png" },
+              );
+              attachments.push({
+                ref: entry.ref,
+                fileName: entry.fileName,
+                mime: entry.mime,
+                bytes: entry.bytes,
+              });
+            }
+          }
+          if (attachments.length > 0) row.attachments = attachments;
+        }
         this.#pushRow(row);
         if (!this.firstUserText) this.firstUserText = text;
         continue;
@@ -725,14 +762,52 @@ export class SessionActor {
 
   // ── commands ───────────────────────────────────────────────────────────
 
-  async sendText({ text, modelSelection, commandId, clientId }) {
+  async sendText({ text, modelSelection, commandId, clientId, attachments }) {
     if (this.#disposed) throw new Error("session is disposed");
     if (modelSelection) {
       await this.applyModelSelection(modelSelection, undefined, { persistMarker: false });
     }
+    // Resolve attachments into pi-rs image parts + text-file inlining.
+    const attachmentMeta = [];
+    const images = [];
+    const textParts = [];
+    for (const attachment of attachments ?? []) {
+      const entry = this.#bridge.attachments.get(attachment.ref);
+      if (!entry) continue;
+      attachmentMeta.push({
+        ref: attachment.ref,
+        fileName: attachment.fileName ?? entry.fileName,
+        mime: attachment.mime ?? entry.mime,
+        bytes: attachment.bytes ?? entry.bytes,
+        ...(attachment.previewRef ? { previewRef: attachment.previewRef } : {}),
+      });
+      if (entry.mime.startsWith("image/")) {
+        const found = this.#bridge.attachments.readBytes(attachment.ref);
+        if (found) {
+          images.push({ data: found.bytes.toString("base64"), mimeType: entry.mime });
+        }
+      } else if (isInlineTextMime(entry.mime) && entry.bytes <= 64 * 1024) {
+        const found = this.#bridge.attachments.readBytes(attachment.ref);
+        if (found) {
+          textParts.push(
+            `\n\n<file name=\"${entry.fileName}\" mime=\"${entry.mime}\">\n${found.bytes.toString("utf8").slice(0, 32 * 1024)}\n</file>`,
+          );
+        }
+      } else {
+        textParts.push(`\n\n[attachment: ${entry.fileName} (${entry.mime}, ${entry.bytes} bytes)]`);
+      }
+    }
     const at = Date.now();
     this.lastActivityAt = at;
-    const guided = this.streaming;
+    let guided = this.streaming;
+    if (guided && images.length > 0) {
+      // pi-rs cannot attach images to an in-flight turn; degrade to a note.
+      images.length = 0;
+      textParts.push(
+        attachmentMeta.map((a) => `\n\n[image attached: ${a.fileName} (${a.mime})]`).join(""),
+      );
+    }
+    const fullText = `${text}${textParts.join("")}`;
     if (!this.#turnOpen) {
       this.#turnId = randomUUID();
       this.#turnHadError = false;
@@ -771,6 +846,9 @@ export class SessionActor {
       clientId,
       guided,
     });
+    if (attachmentMeta.length > 0) {
+      userRow.attachments = attachmentMeta;
+    }
     this.#pushRow(userRow);
     this.#emit([{ op: "row.appended", row: userRow }]);
     if (!this.firstUserText) {
@@ -780,7 +858,11 @@ export class SessionActor {
         this.#emit([this.#statePatch({ meta: this.meta })]);
       }
     }
-    await this.#rpc.request("prompt", { message: text }, { timeoutMs: 15_000 });
+    await this.#rpc.request(
+      "prompt",
+      { message: fullText, ...(images.length > 0 ? { images } : {}) },
+      { timeoutMs: 15_000 },
+    );
     return { delivery: "startNow" };
   }
 
