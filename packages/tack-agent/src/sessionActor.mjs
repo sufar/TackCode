@@ -536,6 +536,10 @@ export class SessionActor {
     return this.#subscriptions.size;
   }
 
+  subscriptionIds() {
+    return [...this.#subscriptions.keys()];
+  }
+
   #emit(ops) {
     if (this.#disposed || ops.length === 0) return;
     this.#outbox.push(...ops);
@@ -895,6 +899,141 @@ export class SessionActor {
       { timeoutMs: 15_000 },
     );
     return { delivery: "startNow" };
+  }
+
+  // ── conversation tree navigation (fork / retry / edit) ──────────────────
+
+  #userEntryAtIndex(index, { requireText = false } = {}) {
+    let count = 0;
+    for (const row of this.rows) {
+      if (row.kind !== "userInput") continue;
+      count += 1;
+      if (count === index) return row;
+    }
+    if (requireText) throw new Error("no user input at that position");
+    return null;
+  }
+
+  #turnUserIndex(turnId) {
+    let index = 0;
+    for (const row of this.rows) {
+      if (row.kind !== "userInput") continue;
+      index += 1;
+      if (row.turnId === turnId) return index;
+    }
+    return 0;
+  }
+
+  async #entriesByRole(role) {
+    const { entries } = await this.#rpc.request("get_entries", {}, { timeoutMs: 30_000 });
+    return (entries ?? []).filter((entry) => entry?.message?.role === role);
+  }
+
+  /** Move the session leaf to just before the Nth user message (1-based). */
+  async #branchBeforeUserIndex(index) {
+    const users = await this.#entriesByRole("user");
+    const user = users[index - 1];
+    if (!user) throw new Error("target turn is out of range");
+    if (user.parentId) {
+      await this.#rpc.request("fork", { entryId: user.parentId }, { timeoutMs: 30_000 });
+      return;
+    }
+    // Before the very first message = rewind to an empty session.
+    await this.#rpc.request("new_session", {}, { timeoutMs: 30_000 });
+  }
+
+  /** Move the session leaf to the end of the Nth user-message turn. */
+  async #branchAfterUserIndex(index) {
+    const users = await this.#entriesByRole("user");
+    const user = users[index - 1];
+    if (!user) throw new Error("target turn is out of range");
+    const next = users[index];
+    if (next?.parentId) {
+      await this.#rpc.request("fork", { entryId: next.parentId }, { timeoutMs: 30_000 });
+      return;
+    }
+    const { leafId } = await this.#rpc.request("get_entries", {}, { timeoutMs: 30_000 });
+    if (leafId) await this.#rpc.request("fork", { entryId: leafId }, { timeoutMs: 30_000 });
+  }
+
+  async #rebuildAfterBranch() {
+    this.rows = [];
+    this.#rowById.clear();
+    this.#contentRows.clear();
+    this.#toolRows.clear();
+    this.#subagentRows.clear();
+    this.#rowFactory.reset();
+    this.#turnId = null;
+    this.#turnHeaderRow = null;
+    this.#turnOpen = false;
+    this.#turnHadError = false;
+    this.streaming = false;
+    this.compacting = false;
+    this.logEpoch = randomUUID();
+    this.seq = 0;
+    this.usage = {
+      contextWindow: null,
+      cumulative: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    };
+    await this.#readState();
+    await this.#rebuildFromHistory(null);
+    // logEpoch changed: subscribers need a fresh snapshot (recovery frame).
+    for (const subscriptionId of [...this.#subscriptions.keys()]) {
+      const { frame } = this.snapshot(subscriptionId);
+      this.#bridge.sendConversationFrame(this.sessionId, [subscriptionId], {
+        ...frame,
+        deliveryKind: "recovery",
+      });
+    }
+    this.#bridge.notifySessionChanged(this);
+  }
+
+  /** forkAssistant: clone the session, branch the copy after the target turn. */
+  async forkAssistant(target) {
+    if (this.streaming) throw new Error("wait for the current response to finish");
+    const row = this.#rowById.get(target.rowId);
+    if (!row) throw new Error(`unknown row ${target.rowId}`);
+    const index = this.#turnUserIndex(row.turnId);
+    if (!index) throw new Error("target turn has no user input");
+    // clone replaces the rpc session with the fork (new session id, full history).
+    await this.#rpc.request("clone", {}, { timeoutMs: 60_000 });
+    const state = await this.#rpc.request("get_state");
+    const newSessionId = state.sessionId;
+    await this.#branchAfterUserIndex(index);
+    return { sessionId: newSessionId };
+  }
+
+  detachAllSubscriptions() {
+    this.#subscriptions.clear();
+  }
+
+  async rebindAfterFork() {
+    await this.#rebuildAfterBranch();
+  }
+
+  /** editUserQuery: rewind to before the target user message and resend. */
+  async editUserQuery(target, newText) {
+    if (this.streaming) throw new Error("wait for the current response to finish");
+    const row = this.#rowById.get(target.rowId);
+    if (!row || row.kind !== "userInput") throw new Error("editUserQuery targets a user message");
+    const index = this.#turnUserIndex(row.turnId);
+    await this.#branchBeforeUserIndex(index);
+    await this.#rebuildAfterBranch();
+    await this.sendText({ text: newText, commandId: undefined, clientId: undefined });
+    return { disposition: "rewind", sessionId: this.sessionId };
+  }
+
+  /** retryTurn: rewind to before the target turn and resend its user text. */
+  async retryTurn(target) {
+    if (this.streaming) throw new Error("wait for the current response to finish");
+    const row = this.#rowById.get(target.rowId);
+    if (!row) throw new Error(`unknown row ${target.rowId}`);
+    const index = this.#turnUserIndex(row.turnId);
+    const userRow = this.#userEntryAtIndex(index, { requireText: true });
+    await this.#branchBeforeUserIndex(index);
+    await this.#rebuildAfterBranch();
+    await this.sendText({ text: userRow.text, commandId: undefined, clientId: undefined });
+    return { disposition: "rewind", sessionId: this.sessionId };
   }
 
   async stop() {

@@ -200,6 +200,21 @@ export class WorkspaceBridge {
     this.#childParentMap.set(childSessionId, parentSessionId);
   }
 
+  #rebindActorToForkedSession(actor, newSessionId) {
+    const oldSessionId = actor.sessionId;
+    this.#actors.delete(oldSessionId);
+    for (const subscriptionId of [...actor.subscriptionIds()]) {
+      this.#dropSubscription(subscriptionId);
+    }
+    actor.detachAllSubscriptions();
+    actor.sessionId = newSessionId;
+    this.#actors.set(newSessionId, actor);
+    actor
+      .rebindAfterFork()
+      .catch((error) => this.#log(`[tack-agent] fork rebuild failed: ${error.message}`));
+    this.notifySessionChanged(actor);
+  }
+
   #withAttachmentError(run) {
     try {
       return run();
@@ -959,6 +974,72 @@ export class WorkspaceBridge {
             status: "accepted",
             revisionAtDecision: actor.revision,
           });
+        }
+        case "forkAssistant": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          try {
+            const { sessionId: newSessionId } = await actor.forkAssistant(payload.target ?? {});
+            this.#rebindActorToForkedSession(actor, newSessionId);
+            this.registerChildSession(sessionId, newSessionId);
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "accepted",
+              revisionAtDecision: actor.revision,
+              result: { type: "forkAssistant", sessionId: newSessionId },
+            });
+          } catch (error) {
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "failed",
+              reasonCode: "fork.rejected",
+              message: error.message,
+              revisionAtDecision: actor.revision,
+            });
+          }
+        }
+        case "editUserQuery": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          try {
+            const outcome = await actor.editUserQuery(payload.target ?? {}, payload.newText ?? "");
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "accepted",
+              revisionAtDecision: actor.revision,
+              result: {
+                type: "editUserQuery",
+                disposition: outcome.disposition,
+                sessionId: outcome.sessionId,
+              },
+            });
+          } catch (error) {
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "failed",
+              reasonCode: "edit.rejected",
+              message: error.message,
+              revisionAtDecision: actor.revision,
+            });
+          }
+        }
+        case "retryTurn": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          try {
+            await actor.retryTurn(payload.target ?? {});
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "accepted",
+              revisionAtDecision: actor.revision,
+              result: { type: "inputAccepted", delivery: "startNow", inputId: randomUUID() },
+            });
+          } catch (error) {
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "failed",
+              reasonCode: "retry.rejected",
+              message: error.message,
+              revisionAtDecision: actor.revision,
+            });
+          }
         }
         case "deleteSession": {
           const actor = this.#actors.get(sessionId);
