@@ -926,7 +926,28 @@ export class WorkspaceBridge {
             status: "accepted",
             revisionAtDecision: 0,
           });
-        case "resolveInteraction":
+        case "resolveInteraction": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          const outcome = await actor.resolveInteractionCommand(
+            payload.interactionId ?? "",
+            payload.answer ?? {},
+            envelope.clientId ?? "unknown",
+          );
+          if (!outcome.resolved) {
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "noop",
+              reasonCode: outcome.reasonCode ?? "proto.alreadyResolved",
+              revisionAtDecision: actor.revision,
+            });
+          }
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+            result: { type: "resolveInteraction", resolvedBy: outcome.resolvedBy },
+          });
+        }
         case "snoozeInteractionAutoResolution":
           return this.#recordAck(sessionId, {
             commandId,

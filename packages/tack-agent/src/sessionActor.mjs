@@ -24,6 +24,91 @@ const IDLE_CONTROL = {
   apiRetry: null,
 };
 
+/** ZCode collaboration mode -> pi SessionMode. */
+export function zcodeModeToPi(mode) {
+  switch (mode) {
+    case "plan":
+      return "plan";
+    case "edit":
+      return "acceptEdits";
+    case "yolo":
+      return "bypass";
+    default:
+      return "ask"; // build / auto
+  }
+}
+
+const PERMISSION_DENIED_CONTENT =
+  "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+
+/**
+ * Permission options come in two vocabularies the host validates strictly:
+ * legacy reverse-request options (zcodePermissionOptionSchema:
+ * optionId/kind/name/response) and v4 snapshot options (optionId/label/
+ * kind: allowOnce|allowAlways|deny). Declared responses mirror the real
+ * CLI's buildProtocolPermissionOptions.
+ */
+function buildPermissionOptions(toolName) {
+  const legacy = [
+    {
+      optionId: "allow_once",
+      kind: "allow_once",
+      name: "Allow once",
+      response: { decision: "allow", reason: "Approved once" },
+    },
+    {
+      optionId: "allow_project",
+      kind: "allow_always",
+      name: "Always allow in this project",
+      description: "Do not ask again for matching requests in this project",
+      response: {
+        decision: "allow",
+        reason: "Approved for this project",
+        permissionUpdates: [{ type: "addRules", behavior: "allow", rules: [{ toolName }] }],
+      },
+    },
+    {
+      optionId: "deny",
+      kind: "deny",
+      name: "Deny",
+      response: { decision: "deny", reason: PERMISSION_DENIED_CONTENT },
+    },
+  ];
+  const v4 = [
+    { optionId: "allowOnce", label: "Allow once", kind: "allowOnce", response: legacy[0].response },
+    {
+      optionId: "allowAlways",
+      label: "Always allow in this project",
+      kind: "allowAlways",
+      response: legacy[1].response,
+    },
+    { optionId: "deny", label: "Deny", kind: "deny", response: legacy[2].response },
+  ];
+  return { legacy, v4 };
+}
+
+function riskLevelForTool(toolName) {
+  if (toolName === "bash") return "high";
+  if (toolName === "write" || toolName === "edit") return "medium";
+  return "low";
+}
+
+/** ZCodePermissionResponse -> pi permission_response payload. */
+function zcodeResponseToPiDecision(response) {
+  if (
+    !response ||
+    response.decision === "deny" ||
+    response.decision === "escalate" ||
+    response.decision === "modify"
+  ) {
+    return { decision: "deny", ...(response?.reason ? { reason: response.reason } : {}) };
+  }
+  const hasAlways = (response.permissionUpdates ?? []).some(
+    (update) => update?.type === "addRules" && update.behavior === "allow",
+  );
+  return { decision: hasAlways ? "allowAlways" : "allow" };
+}
+
 /** Map a v4 toolCall row to a legacy zcodeToolStateSchema state. */
 function legacyToolState(row) {
   const startedAt = row.startedAt ?? row.createdAt;
@@ -111,6 +196,8 @@ export class SessionActor {
   streaming = false;
   compacting = false;
   firstUserText = null;
+  pendingInteractions = [];
+  #pendingPermissions = new Map(); // interactionId -> pending permission
 
   constructor({ bridge, workspace, sessionId }) {
     this.#bridge = bridge;
@@ -185,6 +272,12 @@ export class SessionActor {
       this.config.thoughtLevels = levels?.levels ?? [];
     } catch {
       this.config.thoughtLevels = [];
+    }
+    // Apply the collaboration mode's permission mode (build -> ask, ...).
+    try {
+      await this.#rpc.request("set_mode", { mode: zcodeModeToPi(this.config.mode) });
+    } catch (error) {
+      this.#bridge.log(`[tack-agent] set_mode failed: ${error.message}`);
     }
     this.control.phase = this.streaming ? "running" : "draft";
     if (this.streaming) {
@@ -426,7 +519,7 @@ export class SessionActor {
             modelTransition: null,
             usage: this.usage,
             queue: { items: [], autoDrain: true },
-            pendingInteractions: [],
+            pendingInteractions: this.pendingInteractions,
             pendingCommands: [],
             backgroundWorks: [],
             subagents: { revision: 0, childSessionIds: [], running: [], endedTotal: 0 },
@@ -823,10 +916,40 @@ export class SessionActor {
   }
 
   async switchCollaborationMode(mode) {
-    // pi-rs rpc runs tools in bypass mode; collaboration mode is presentation-
-    // level here. Persist the choice so the UI reflects it.
+    // Map to pi's SessionMode: permission prompts now gate tool calls.
     this.config = { ...this.config, mode };
+    try {
+      await this.#rpc.request("set_mode", { mode: zcodeModeToPi(mode) });
+    } catch (error) {
+      this.#bridge.log(`[tack-agent] set_mode failed: ${error.message}`);
+    }
     this.#emit([this.#statePatch({ config: this.config })]);
+  }
+
+  /** v4 resolveInteraction command (permission answers from the UI). */
+  async resolveInteractionCommand(interactionId, answer, clientId) {
+    const pending = this.#pendingPermissions.get(interactionId);
+    if (!pending) {
+      return { resolved: false, reasonCode: "proto.alreadyResolved" };
+    }
+    const action = answer?.action;
+    if (action === "decline" || action === "cancel") {
+      await this.#settlePermission(pending, { decision: "deny", reason: undefined });
+      return {
+        resolved: true,
+        resolvedBy: { clientId, ...(answer?.optionId ? { optionId: answer.optionId } : {}) },
+      };
+    }
+    const option =
+      pending.options.find((o) => o.optionId === answer?.optionId) ??
+      pending.options.find((o) => o.optionId === "deny");
+    const response = { ...option.response };
+    if (answer?.freeText?.trim()) response.reason = answer.freeText.trim();
+    await this.#settlePermission(pending, response);
+    return {
+      resolved: true,
+      resolvedBy: { clientId, ...(answer?.optionId ? { optionId: answer.optionId } : {}) },
+    };
   }
 
   // ── pi-rs event pump ───────────────────────────────────────────────────
@@ -874,9 +997,132 @@ export class SessionActor {
         break;
       case "model_fallback":
         break;
+      case "permission_request":
+        void this.#handlePermissionRequest(event);
+        break;
+      case "permission_resolved":
+        this.#handlePermissionResolved(event);
+        break;
       default:
         break;
     }
+  }
+
+  /** pi permission_request -> ZCode permission interaction + host prompt. */
+  async #handlePermissionRequest(event) {
+    const interactionId = event.requestId;
+    const toolCallId = event.toolCallId;
+    if (!interactionId || this.#pendingPermissions.has(interactionId)) return;
+    const at = Date.now();
+    const row = this.#toolRows.get(toolCallId);
+    const options = buildPermissionOptions(event.toolName);
+    const interaction = {
+      interactionId,
+      kind: "permission",
+      anchorRowId: row?.rowId ?? null,
+      createdAt: at,
+      payload: {
+        kind: "permission",
+        toolCallId: toolCallId ?? "",
+        toolName: event.toolName,
+        summary: event.title ?? event.toolName,
+        detail: event.input ?? {},
+        options: options.v4,
+      },
+    };
+    const pending = { interactionId, toolCallId, row, options: options.v4, settled: false };
+    this.#pendingPermissions.set(interactionId, pending);
+    if (row) {
+      row.status = "pendingApproval";
+      row.approvalInteractionId = interactionId;
+    }
+    this.pendingInteractions = [...this.pendingInteractions, interaction];
+    this.#emit([
+      ...(row ? [{ op: "row.upserted", row }] : []),
+      this.#statePatch({ pendingInteractions: this.pendingInteractions }),
+    ]);
+    try {
+      // The host answers when the user resolves the dialog (its broker maps
+      // the chosen option's declared response back to us).
+      const response = await this.#bridge.reverseRequest(
+        "interaction/requestPermission",
+        {
+          requestId: interactionId,
+          sessionId: this.sessionId,
+          ...(this.#turnId ? { turnId: this.#turnId } : {}),
+          toolCallId: toolCallId ?? "",
+          toolName: event.toolName,
+          reason: event.title ?? event.toolName,
+          riskLevel: riskLevelForTool(event.toolName),
+          input: event.input ?? {},
+          options: options.legacy,
+        },
+        10 * 60_000,
+      );
+      this.#bridge.log(
+        `[tack-agent] permission host response: ${JSON.stringify(response)?.slice(0, 300)}`,
+      );
+      await this.#settlePermission(pending, response);
+    } catch (error) {
+      // Host unreachable / transport closed: fail closed (deny), unless the
+      // v4 resolveInteraction path already settled it.
+      this.#bridge.log(
+        `[tack-agent] permission reverse request failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      await this.#settlePermission(pending, {
+        decision: "deny",
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Settle a pending permission: answer pi, clear the interaction. */
+  async #settlePermission(pending, response) {
+    if (pending.settled) return;
+    pending.settled = true;
+    this.#pendingPermissions.delete(pending.interactionId);
+    const pi = zcodeResponseToPiDecision(response);
+    this.#bridge.log(
+      `[tack-agent] permission settle: interaction=${pending.interactionId.slice(0, 24)} decision=${pi.decision} response=${JSON.stringify(response)?.slice(0, 200)}`,
+    );
+    try {
+      await this.#rpc.request(
+        "permission_response",
+        {
+          requestId: pending.interactionId,
+          decision: pi.decision,
+          ...(pi.reason ? { reason: pi.reason } : {}),
+        },
+        { timeoutMs: 10_000 },
+      );
+    } catch (error) {
+      this.#bridge.log(`[tack-agent] permission_response failed: ${error.message}`);
+    }
+    this.#clearPermissionInteraction(pending, pi.decision);
+  }
+
+  /** pi's own resolution (timeout/cancel): just clear the UI state. */
+  #handlePermissionResolved(event) {
+    const pending = this.#pendingPermissions.get(event.requestId);
+    if (!pending) return;
+    pending.settled = true;
+    this.#pendingPermissions.delete(event.requestId);
+    this.#clearPermissionInteraction(pending, event.decision ?? "deny");
+  }
+
+  #clearPermissionInteraction(pending, decision) {
+    this.pendingInteractions = this.pendingInteractions.filter(
+      (item) => item.interactionId !== pending.interactionId,
+    );
+    const row = pending.row;
+    if (row && row.status === "pendingApproval") {
+      row.status = decision === "deny" ? "cancelled" : "running";
+      delete row.approvalInteractionId;
+    }
+    this.#emit([
+      ...(row ? [{ op: "row.upserted", row }] : []),
+      this.#statePatch({ pendingInteractions: this.pendingInteractions }),
+    ]);
   }
 
   #handleAssistantEvent(event) {

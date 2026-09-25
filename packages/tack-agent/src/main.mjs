@@ -124,5 +124,5 @@ export async function main(argv = []) {
   process.once("SIGTERM", () => shutdown(0));
   process.once("SIGINT", () => shutdown(0));
 
-  log(`[tack-agent] ready (cwd=${process.cwd()}, pi=${bridge.piBinary})`);
+  log(`[tack-agent] ready (cwd=${process.cwd()}, pi=${bridge.piBinary}, agentDir=${process.env.PI_RS_AGENT_DIR ?? "~/.pi-rs/agent"})`);
 }
