@@ -272,11 +272,15 @@ export class WorkspaceBridge {
   }
 
   #registerSubscription(topic, connectionId, kind) {
-    // Same-topic resubscribe replaces the previous registration (protocol rule).
+    // Resubscribe replaces only the SAME (connectionId, topic) registration —
+    // the host legitimately runs multiple concurrent consumers of one topic
+    // (task-index syncer AND UI task service both subscribe sessions-index).
     const previous = this.#subscriptionsByTopic.get(topic);
     if (previous) {
-      for (const subId of previous) this.#subscriptions.delete(subId);
-      previous.clear();
+      for (const subId of previous) {
+        const sub = this.#subscriptions.get(subId);
+        if (sub && sub.connectionId === connectionId) this.#subscriptions.delete(subId);
+      }
     }
     const subscriptionId = randomUUID();
     this.#subscriptions.set(subscriptionId, { topic, connectionId, kind });
