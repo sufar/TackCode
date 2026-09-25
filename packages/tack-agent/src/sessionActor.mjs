@@ -503,7 +503,7 @@ export class SessionActor {
     try {
       await this.#rpc.request("abort", {}, { timeoutMs: 10_000 });
     } catch (error) {
-      this.#bridge.log(`[pi-agent] abort failed: ${error.message}`);
+      this.#bridge.log(`[tack-agent] abort failed: ${error.message}`);
     }
     // pi-rs normally winds the turn down with its own events; if it stays
     // silent, force the projection to interrupted so the UI never sticks.
@@ -549,7 +549,7 @@ export class SessionActor {
       marker.marker = { ...marker.marker, status: "success" };
     } catch (error) {
       marker.marker = { ...marker.marker, status: "failed" };
-      this.#bridge.log(`[pi-agent] compact failed: ${error.message}`);
+      this.#bridge.log(`[tack-agent] compact failed: ${error.message}`);
     }
     this.#emit([{ op: "row.upserted", row: marker }]);
   }
@@ -558,7 +558,7 @@ export class SessionActor {
     try {
       await this.#rpc.request("set_session_name", { name: title }, { timeoutMs: 15_000 });
     } catch (error) {
-      this.#bridge.log(`[pi-agent] set_session_name failed: ${error.message}`);
+      this.#bridge.log(`[tack-agent] set_session_name failed: ${error.message}`);
     }
     this.meta = { title, titleSource: "custom" };
     this.#emit([this.#statePatch({ meta: this.meta })]);
@@ -623,7 +623,7 @@ export class SessionActor {
       this.config = { ...this.config, thought: level };
       if (emit) this.#emit([this.#statePatch({ config: this.config })]);
     } catch (error) {
-      this.#bridge.log(`[pi-agent] set_thinking_level failed: ${error.message}`);
+      this.#bridge.log(`[tack-agent] set_thinking_level failed: ${error.message}`);
     }
   }
 

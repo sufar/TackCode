@@ -1,15 +1,15 @@
 {
-  "name": "@tackcode/pi-agent",
+  "name": "@tackcode/tack-agent",
   "version": "0.1.0",
   "private": true,
   "description": "ZCode Protocol bridge that lets the ZCode desktop/web frontend drive a pi-rs agent (pi-rs --mode rpc).",
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "pi-agent": "./bin/pi-agent.mjs"
+    "tack-agent": "./bin/tack-agent.mjs"
   },
   "scripts": {
-    "start": "node bin/pi-agent.mjs",
+    "start": "node bin/tack-agent.mjs",
     "smoke": "node test/smoke.mjs"
   },
   "engines": {

@@ -1,4 +1,4 @@
-# @tackcode/pi-agent
+# @tackcode/tack-agent
 
 ZCode Protocol ⇄ pi-rs 桥接 agent。让 ZCode 桌面/Web 前端把 pi-rs 当作它的 agent 后端。
 
@@ -6,13 +6,13 @@ ZCode Protocol ⇄ pi-rs 桥接 agent。让 ZCode 桌面/Web 前端把 pi-rs 当
 
 ZCode host 通过 `ZCODE_AGENT_SERVER_COMMAND`（+ `ZCODE_AGENT_SERVER_ARGS_JSON`）把 agent
 替换为任意可执行文件；本包就是那个可执行文件。在 TackCode fork 里由
-`desktop/src/main/piAgentDefaults.ts` 自动装配（打包态 = `resources/pi-agent`）。
+`desktop/src/main/tackAgentDefaults.ts` 自动装配（打包态 = `resources/tack-agent`）。
 
 ```bash
 ZCODE_AGENT_SERVER_COMMAND=/path/to/node \
-ZCODE_AGENT_SERVER_ARGS_JSON='[".../packages/pi-agent/bin/pi-agent.mjs"]' \
-ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY=".../packages/pi-agent/bin/pi-agent.mjs" \
-PI_AGENT_STORAGE_STARTUP=1 \
+ZCODE_AGENT_SERVER_ARGS_JSON='[".../packages/tack-agent/bin/tack-agent.mjs"]' \
+ZCODE_AGENT_SERVER_STORAGE_PREPARATION_ENTRY=".../packages/tack-agent/bin/tack-agent.mjs" \
+TACK_AGENT_STORAGE_STARTUP=1 \
 ZCode
 ```
 
@@ -20,10 +20,10 @@ ZCode
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PI_AGENT_PI_BINARY` | `pi-rs`（PATH） | 要驱动的 pi-rs 可执行文件 |
+| `TACK_AGENT_PI_BINARY` | `pi-rs`（PATH） | 要驱动的 pi-rs 可执行文件 |
 | `PI_RS_AGENT_DIR` | `~/.pi-rs/agent` | pi-rs 数据目录（会话/凭据/设置） |
-| `PI_AGENT_STORAGE_STARTUP` | — | `1` = 启动时上报 agent 存储就绪帧（桌面启动门要求） |
-| `PI_AGENT_LOG_FILE` | — | bridge 诊断日志（stdout 是协议通道，勿混用） |
+| `TACK_AGENT_STORAGE_STARTUP` | — | `1` = 启动时上报 agent 存储就绪帧（桌面启动门要求） |
+| `TACK_AGENT_LOG_FILE` | — | bridge 诊断日志（stdout 是协议通道，勿混用） |
 
 ## 协议覆盖（v0.1）
 

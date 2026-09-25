@@ -10,7 +10,7 @@ const ERROR_PARSE = -32700;
 const ERROR_INTERNAL = -32603;
 
 export async function main(argv = []) {
-  const logFile = process.env.PI_AGENT_LOG_FILE;
+  const logFile = process.env.TACK_AGENT_LOG_FILE;
   const log = (message) => {
     // Diagnostics go to stderr only; stdout is the protocol channel.
     console.error(message);
@@ -51,8 +51,8 @@ export async function main(argv = []) {
   });
 
   // The host gates requests on agent-owned storage readiness when the command
-  // declares supportsStorageStartup (mirrored via PI_AGENT_STORAGE_STARTUP=1).
-  if (process.env.PI_AGENT_STORAGE_STARTUP === "1") {
+  // declares supportsStorageStartup (mirrored via TACK_AGENT_STORAGE_STARTUP=1).
+  if (process.env.TACK_AGENT_STORAGE_STARTUP === "1") {
     await reportBootStorageReady({
       cwd: process.cwd(),
       env: { ...process.env },
@@ -71,7 +71,7 @@ export async function main(argv = []) {
         return;
       }
       handleMessage(parsed.value).catch((error) => {
-        log(`[pi-agent] dispatch error: ${error?.stack ?? error}`);
+        log(`[tack-agent] dispatch error: ${error?.stack ?? error}`);
       });
     },
     onClose: () => shutdown(0),
@@ -96,7 +96,7 @@ export async function main(argv = []) {
         if (error instanceof ProtocolError) {
           send({ id, error: { code: error.code, message: error.message, ...(error.data !== undefined ? { data: error.data } : {}) } });
         } else {
-          log(`[pi-agent] ${method} failed: ${error?.stack ?? error}`);
+          log(`[tack-agent] ${method} failed: ${error?.stack ?? error}`);
           send({
             id,
             error: {
@@ -124,5 +124,5 @@ export async function main(argv = []) {
   process.once("SIGTERM", () => shutdown(0));
   process.once("SIGINT", () => shutdown(0));
 
-  log(`[pi-agent] ready (cwd=${process.cwd()}, pi=${bridge.piBinary})`);
+  log(`[tack-agent] ready (cwd=${process.cwd()}, pi=${bridge.piBinary})`);
 }

@@ -86,7 +86,7 @@ export class WorkspaceBridge {
   }
 
   get piBinary() {
-    return this.#env.PI_AGENT_PI_BINARY || "pi-rs";
+    return this.#env.TACK_AGENT_PI_BINARY || "pi-rs";
   }
 
   /** Map a ZCode-side provider id to pi-rs's builtin provider id. */
@@ -126,7 +126,7 @@ export class WorkspaceBridge {
     try {
       this.#modelCatalog = listModels(this.piBinary, this.piSpawnEnv());
     } catch (error) {
-      this.#log(`[pi-agent] pi-rs models failed: ${error.message}`);
+      this.#log(`[tack-agent] pi-rs models failed: ${error.message}`);
       this.#modelCatalog = [];
     }
     return this.#modelCatalog;
@@ -176,7 +176,7 @@ export class WorkspaceBridge {
     if (this.#authPending.has(providerId)) return this.#authPending.get(providerId);
     const task = this.#fetchProviderAuth(providerId, { sessionId, workspace, modelSelection })
       .catch((error) => {
-        this.#log(`[pi-agent] provider auth fetch failed for ${providerId}: ${error.message}`);
+        this.#log(`[tack-agent] provider auth fetch failed for ${providerId}: ${error.message}`);
       })
       .finally(() => this.#authPending.delete(providerId));
     this.#authPending.set(providerId, task);
@@ -202,13 +202,13 @@ export class WorkspaceBridge {
       try {
         writeAuthApiKey(providerId, apiKey, this.#env);
       } catch (error) {
-        this.#log(`[pi-agent] writing auth.json for ${providerId} failed: ${error.message}`);
+        this.#log(`[tack-agent] writing auth.json for ${providerId} failed: ${error.message}`);
       }
       return;
     }
     this.#providerKeys.set(providerId, { apiKey: null, source: "unavailable" });
     if (result?.errorMessage) {
-      this.#log(`[pi-agent] host declined headers for ${providerId}: ${result.errorMessage}`);
+      this.#log(`[tack-agent] host declined headers for ${providerId}: ${result.errorMessage}`);
     }
   }
 
@@ -687,7 +687,7 @@ export class WorkspaceBridge {
                 commandId,
                 clientId: envelope.clientId,
               })
-              .catch((error) => this.#log(`[pi-agent] firstInput failed: ${error.message}`));
+              .catch((error) => this.#log(`[tack-agent] firstInput failed: ${error.message}`));
           }
           return this.#recordAck(null, {
             commandId,
@@ -706,7 +706,7 @@ export class WorkspaceBridge {
               commandId,
               clientId: envelope.clientId,
             })
-            .catch((error) => this.#log(`[pi-agent] sendText failed: ${error.message}`));
+            .catch((error) => this.#log(`[tack-agent] sendText failed: ${error.message}`));
           return this.#recordAck(sessionId, {
             commandId,
             status: "accepted",
@@ -716,7 +716,7 @@ export class WorkspaceBridge {
         }
         case "stop": {
           const actor = await this.#ensureActor(sessionId, workspaceId);
-          actor.stop().catch((error) => this.#log(`[pi-agent] stop failed: ${error.message}`));
+          actor.stop().catch((error) => this.#log(`[tack-agent] stop failed: ${error.message}`));
           return this.#recordAck(sessionId, {
             commandId,
             status: "accepted",
@@ -727,7 +727,7 @@ export class WorkspaceBridge {
           const actor = await this.#ensureActor(sessionId, workspaceId);
           actor
             .compact()
-            .catch((error) => this.#log(`[pi-agent] compact failed: ${error.message}`));
+            .catch((error) => this.#log(`[tack-agent] compact failed: ${error.message}`));
           return this.#recordAck(sessionId, {
             commandId,
             status: "accepted",
@@ -764,7 +764,7 @@ export class WorkspaceBridge {
               { providerId: payload.provider, modelId: payload.model },
               payload.thought,
             )
-            .catch((error) => this.#log(`[pi-agent] switchModelConfig failed: ${error.message}`));
+            .catch((error) => this.#log(`[tack-agent] switchModelConfig failed: ${error.message}`));
           return this.#recordAck(sessionId, {
             commandId,
             status: "accepted",
@@ -799,7 +799,7 @@ export class WorkspaceBridge {
             commandId,
             status: "failed",
             reasonCode: "unsupported.command",
-            message: `pi-agent does not support command ${type}`,
+            message: `tack-agent does not support command ${type}`,
             revisionAtDecision: 0,
           });
       }

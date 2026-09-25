@@ -259,10 +259,10 @@ if (!app.isPackaged && process.env.ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT !==
 }
 
 app.setName(runtimeApplicationName);
-// TackCode: default the agent backend to the bundled pi-agent bridge before
+// TackCode: default the agent backend to the bundled tack-agent bridge before
 // any host process can resolve an agent command (env override always wins).
-const { applyPiAgentDefaults } = await import("./piAgentDefaults.js");
-applyPiAgentDefaults();
+const { applyTackAgentDefaults } = await import("./tackAgentDefaults.js");
+applyTackAgentDefaults();
 if (runtimeHomePath) {
   app.setPath("home", runtimeHomePath);
 }

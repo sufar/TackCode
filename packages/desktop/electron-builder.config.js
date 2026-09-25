@@ -571,10 +571,10 @@ export default {
   extraResources: [
     { from: resolve(workspaceRoot, noticesFileName), to: noticesFileName },
     {
-      // TackCode: the pi-agent bridge is the fork's default agent backend;
-      // ship it next to the app so piAgentDefaults can point the host at it.
-      from: resolve(workspaceRoot, "packages/pi-agent"),
-      to: "pi-agent",
+      // TackCode: the tack-agent bridge is the fork's default agent backend;
+      // ship it next to the app so tackAgentDefaults can point the host at it.
+      from: resolve(workspaceRoot, "packages/tack-agent"),
+      to: "tack-agent",
       filter: ["**/*", "!test/**", "!node_modules/**"],
     },
     ...(targetPlatform.os === "darwin"

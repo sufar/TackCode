@@ -1027,6 +1027,8 @@ importers:
         specifier: ^6.0.2
         version: 6.0.2
 
+  packages/tack-agent: {}
+
   packages/ui:
     dependencies:
       '@aiden0z/pptx-renderer':

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bridgeBin = path.join(here, "..", "bin", "pi-agent.mjs");
+const bridgeBin = path.join(here, "..", "bin", "tack-agent.mjs");
 const promptArg = process.argv.includes("--prompt")
   ? process.argv[process.argv.indexOf("--prompt") + 1]
   : null;
@@ -19,7 +19,7 @@ const modelSelection = providerArg && modelArg ? { providerId: providerArg, mode
 
 const child = spawn(process.execPath, [bridgeBin], {
   cwd: process.cwd(),
-  env: { ...process.env, PI_AGENT_PI_BINARY: process.env.PI_AGENT_PI_BINARY || "pi-rs" },
+  env: { ...process.env, TACK_AGENT_PI_BINARY: process.env.TACK_AGENT_PI_BINARY || "pi-rs" },
   stdio: ["pipe", "pipe", "inherit"],
 });
 

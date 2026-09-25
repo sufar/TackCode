@@ -11,7 +11,7 @@ pi-rs 桌面应用。Zhipu/GLM 的商业化内容（登录、套餐、广告、�
 │  zcode-host (utility process: services, provider registry, tasks-index sqlite) │
 │      │  ZCode Protocol v4 (LF-JSONL stdio)                                     │
 │  ┌───┴─────────────────────┐          ┌──────────────────┐                     │
-│  │ packages/pi-agent (bridge)│ ──────▶  │ pi-rs --mode rpc │  (per session)     │
+│  │ packages/tack-agent (bridge)│ ──────▶  │ pi-rs --mode rpc │  (per session)     │
 │  │  ZCode 协议子集 ⇄ pi rpc  │  JSONL   │  (用户自己的 pi-rs │                    │
 │  └──────────────────────────┘          │   安装/凭据/会话)  │                   │
 └─────────────────────────────────────────┴──────────────────┴───────────────────┘
@@ -21,7 +21,7 @@ pi-rs 桌面应用。Zhipu/GLM 的商业化内容（登录、套餐、广告、�
 
 ZCode 桌面端通过一个 **agent 子进程**（stdio 上的 LF-JSONL "ZCode Protocol"）驱动 Agent，
 并且官方支持用环境变量 `ZCODE_AGENT_SERVER_COMMAND` 指向任意二进制。
-`packages/pi-agent` 就是这个边界上的替换实现：它对桌面端讲 ZCode Protocol v4 的一个子集
+`packages/tack-agent` 就是这个边界上的替换实现：它对桌面端讲 ZCode Protocol v4 的一个子集
 （sessions-index / workspace-config / conversation 三个 topic 的订阅、`v4/command`、
 wire 帧、存储启动握手），对内为每个会话 spawn 一个 `pi-rs --mode rpc` 进程，把 pi-rs 的
 流式事件翻译成 v4 的 rows/delta 投影。
@@ -55,22 +55,22 @@ wire 帧、存储启动握手），对内为每个会话 spawn 一个 `pi-rs --m
 .toolchains/node-v24.14.0-darwin-arm64/bin/node --version
 corepack pnpm install
 
-# 启动桌面 dev（需要 pi-rs 可执行文件；PI_AGENT_PI_BINARY 可显式指定）
-PI_AGENT_PI_BINARY=/path/to/pi-rs scripts/dev-tackcode.sh
+# 启动桌面 dev（需要 pi-rs 可执行文件；TACK_AGENT_PI_BINARY 可显式指定）
+TACK_AGENT_PI_BINARY=/path/to/pi-rs scripts/dev-tackcode.sh
 ```
 
 `dev-tackcode.sh` 会设置隔离的数据目录（`TACKCODE_HOME`，默认 `/tmp/tackcode-home`）、
 Electron userData、`PI_RS_AGENT_DIR`（pi-rs 的会话/凭据目录），并通过
-`piAgentDefaults` 让 host 自动使用 `packages/pi-agent` 作为 agent。
+`tackAgentDefaults` 让 host 自动使用 `packages/tack-agent` 作为 agent。
 
 常用调试入口：
 
-- `PI_AGENT_LOG_FILE`（默认 `$TACKCODE_HOME/pi-agent.log`）：bridge 日志
-- `PI_AGENT_TRACE=1`：bridge 协议收发（预留）
+- `TACK_AGENT_LOG_FILE`（默认 `$TACKCODE_HOME/tack-agent.log`）：bridge 日志
+- `TACK_AGENT_TRACE=1`：bridge 协议收发（预留）
 - `TACKCODE_DEBUG_HOST=1`：host 启动检查点日志
-- `packages/pi-agent/test/smoke.mjs`：不依赖桌面的协议冒烟
+- `packages/tack-agent/test/smoke.mjs`：不依赖桌面的协议冒烟
   `node test/smoke.mjs --prompt "Reply with exactly: PONG" --provider deepseek --model deepseek-chat`
-- `packages/pi-agent/test/cdp.mjs`：CDP 驱动运行中的桌面 UI（pages/eval/text/click-text/type/key/shot）
+- `packages/tack-agent/test/cdp.mjs`：CDP 驱动运行中的桌面 UI（pages/eval/text/click-text/type/key/shot）
 
 ## 模型与凭据
 
@@ -115,17 +115,17 @@ git rebase --onto upstream/main <旧基线> main
 corepack pnpm install
 node scripts/strip-zhipu-providers.mjs   # 上游新增/改动目录条目后重跑
 corepack pnpm typecheck && corepack pnpm lint
-node packages/pi-agent/test/smoke.mjs    # 协议冒烟（会验证 wire 帧与 seq 不变量）
+node packages/tack-agent/test/smoke.mjs    # 协议冒烟（会验证 wire 帧与 seq 不变量）
 ```
 
 补丁面（按冲突概率排序，全部带 `TackCode` 注释锚点便于 grep）：
 
-1. `packages/pi-agent/**` — 全新目录，零冲突。
+1. `packages/tack-agent/**` — 全新目录，零冲突。
 2. `scripts/dev-tackcode.sh`、`scripts/strip-zhipu-providers.mjs` — 新增，零冲突。
 3. `packages/shared/src/zcodeEndpoint.ts`、`plugin-marketplaces.ts` — 常量改动，小冲突面。
 4. `packages/services/src/zcode-agent/zcodeAgentProcessManager.ts`（env 覆盖扩展）、
    `oauth/runtimeConfig.ts`、`model-provider/zcodeBuiltinRemoteConfig.ts` — 单点小改。
-5. `packages/desktop/src/main/{piAgentDefaults.ts,index.ts}`、`autoUpdater.ts`、
+5. `packages/desktop/src/main/{tackAgentDefaults.ts,index.ts}`、`autoUpdater.ts`、
    `scripts/dev.mjs`、`electron-builder.config.js` — 单点小改。
 6. `packages/ui` 的 help 菜单/模板选择器 + 两个 locale（大批量 ZCode→TackCode 文案）—
    i18n 冲突最多，建议冲突时取上游版本后重跑文案替换（sed）。
