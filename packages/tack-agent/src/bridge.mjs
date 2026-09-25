@@ -77,6 +77,7 @@ export class WorkspaceBridge {
   #reversePending = new Map();
   #reverseNextId = 1;
   #disposed = false;
+  #hostWorkspacePath = null;
 
   constructor({ send, cwd, env, log }) {
     this.#send = send;
@@ -124,7 +125,7 @@ export class WorkspaceBridge {
 
   workspaceRef(workspaceId) {
     return {
-      workspacePath: this.#cwd,
+      workspacePath: this.#hostWorkspacePath ?? this.#cwd,
       workspaceKey: workspaceId ?? this.#cwd,
     };
   }
@@ -494,16 +495,19 @@ export class WorkspaceBridge {
   async #ensureActor(sessionId, workspaceRef) {
     const existing = this.#actors.get(sessionId);
     if (existing) {
-      // Late-arriving workspace identity (first seen via subscribe params)
-      // still upgrades the actor's ref so legacy snapshots group correctly.
+      // Late-arriving workspace facts (first seen via subscribe params) still
+      // upgrade the actor's ref so legacy snapshots group correctly.
       if (workspaceRef?.workspaceIdentity && !existing.workspace.workspaceIdentity) {
         existing.workspace.workspaceIdentity = workspaceRef.workspaceIdentity;
+      }
+      if (workspaceRef?.workspacePath && existing.workspace.workspacePath !== workspaceRef.workspacePath) {
+        existing.workspace.workspacePath = workspaceRef.workspacePath;
       }
       return existing;
     }
     if (this.#pendingActors.has(sessionId)) return this.#pendingActors.get(sessionId);
     const workspace = {
-      workspacePath: this.#cwd,
+      workspacePath: workspaceRef?.workspacePath ?? this.#cwd,
       workspaceKey: workspaceRef?.workspaceKey ?? workspaceRef ?? this.#cwd,
       ...(workspaceRef?.workspaceIdentity
         ? { workspaceIdentity: workspaceRef.workspaceIdentity }
@@ -626,7 +630,11 @@ export class WorkspaceBridge {
     const connectionId = params.connectionId ?? "default";
     if (topic.startsWith("conversation/")) {
       const sessionId = topic.slice("conversation/".length);
+      if (params.workspace?.workspacePath && !this.#hostWorkspacePath) {
+        this.#hostWorkspacePath = params.workspace.workspacePath;
+      }
       const actor = await this.#ensureActor(sessionId, {
+        workspacePath: params.workspace?.workspacePath,
         workspaceKey: params.workspace?.workspaceKey ?? this.#cwd,
         workspaceIdentity: params.workspace?.workspaceIdentity,
       });
