@@ -218,6 +218,84 @@ if (promptArg) {
   }
 }
 
+// 8. mcp/list（设置页状态检查）：真实 stdio MCP server → connected + toolCount
+const mockServerPath = path.join(here, "mockMcpServer.mjs");
+const smokeMcpServer = {
+  name: "smoke-mcp",
+  command: process.execPath,
+  args: [mockServerPath],
+  env: [],
+};
+const mcpList = await request("mcp/list", {
+  workspace: { workspacePath: process.cwd(), workspaceKey: "smoke" },
+  mcpServers: [smokeMcpServer],
+  mode: "connect",
+});
+const smokeStatus = mcpList.result?.statuses?.["smoke-mcp"];
+assert(
+  smokeStatus?.status === "connected",
+  `mcp/list smoke-mcp connected (${smokeStatus?.status ?? "missing"}: ${smokeStatus?.error ?? "no error"})`,
+);
+assert(
+  smokeStatus.toolCount === 1,
+  `mcp/list smoke-mcp toolCount == 1 (got ${smokeStatus.toolCount})`,
+);
+assert(smokeStatus.transport === "stdio", "mcp/list smoke-mcp transport stdio");
+
+// 9. mode=status 只读：池内 smoke-mcp 仍 connected，未连接的 fresh-mcp 报 disconnected
+const mcpStatusOnly = await request("mcp/list", {
+  workspace: { workspacePath: process.cwd(), workspaceKey: "smoke" },
+  mcpServers: [
+    smokeMcpServer,
+    { name: "fresh-mcp", command: process.execPath, args: [mockServerPath, "--name", "fresh"], env: [] },
+  ],
+  mode: "status",
+});
+assert(
+  mcpStatusOnly.result?.statuses?.["smoke-mcp"]?.status === "connected",
+  "mcp/list mode=status reuses the live pool (smoke-mcp still connected)",
+);
+assert(
+  mcpStatusOnly.result?.statuses?.["fresh-mcp"]?.status === "disconnected",
+  "mcp/list mode=status never connects new servers (fresh-mcp disconnected)",
+);
+
+// 10. 不可达 server → failed + error（不 throw、不拖垮整批）
+const mcpFail = await request("mcp/list", {
+  workspace: { workspacePath: process.cwd(), workspaceKey: "smoke" },
+  mcpServers: [
+    { name: "ghost-mcp", command: "definitely-not-a-real-tack-mcp-command", args: [], env: [] },
+  ],
+  mode: "connect",
+});
+const ghostStatus = mcpFail.result?.statuses?.["ghost-mcp"];
+assert(
+  ghostStatus?.status === "failed" && typeof ghostStatus.error === "string" && ghostStatus.error,
+  `mcp/list ghost-mcp failed with error (${ghostStatus?.status ?? "missing"})`,
+);
+assert(ghostStatus.failureKind === "connection_failed", "ghost-mcp failureKind connection_failed");
+
+// 11. createSession 透传 mcpServers（runtime 启动期配置）→ 会话正常创建
+const createMcp = await request("v4/command", {
+  commandId: crypto.randomUUID(),
+  clientId: "smoke-client",
+  sessionId: null,
+  type: "createSession",
+  payload: { workspaceId: "smoke", mcpServers: [smokeMcpServer] },
+  issuedAt: Date.now(),
+});
+const mcpSessionId = createMcp.result?.result?.sessionId;
+assert(
+  createMcp.result?.status === "accepted" && mcpSessionId,
+  `createSession with mcpServers accepted (${mcpSessionId})`,
+);
+const mcpConvSub = await request("v4/conversation/subscribe", {
+  topic: `conversation/${mcpSessionId}`,
+  connectionId: "conn-1",
+  clientMode: "desktop-continuous",
+});
+assert(mcpConvSub.result?.ack?.subscriptionId, "mcp session conversation subscribe ack");
+
 console.log("\nSMOKE PASS");
 child.kill("SIGTERM");
 process.exit(0);

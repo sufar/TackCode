@@ -226,6 +226,7 @@ export class SessionActor {
   #pendingPermissions = new Map(); // interactionId -> pending permission
   #backgroundWorks = []; // backgroundWorkSummarySchema[]
   #queueItems = []; // queued follow_up intents (conversationInputIntentSchema[])
+  #mcpServers = null; // pi-shape servers map injected at session create (host mcpServers)
   #admissionSeq = 0;
   #autoDrain = true;
 
@@ -243,10 +244,13 @@ export class SessionActor {
 
   // ── lifecycle ──────────────────────────────────────────────────────────
 
-  static async spawnNew({ bridge, workspace, config }) {
+  static async spawnNew({ bridge, workspace, config, mcpServers }) {
     const actor = new SessionActor({ bridge, workspace, sessionId: null });
     await actor.#spawn();
     await actor.#readState();
+    // MCP 是 runtime 启动期配置：必须在首个 prompt 之前注入（fingerprint
+    // 变化会让 pi-rs 在建池时连同这批 server 一起连接）。
+    if (mcpServers) await actor.applyMcpServers(mcpServers);
     if (config?.provider && config?.model) {
       await actor.applyModelSelection(
         { providerId: config.provider, modelId: config.model },
@@ -1144,6 +1148,18 @@ export class SessionActor {
     this.meta = { title, titleSource: "custom" };
     this.#emit([this.#statePatch({ meta: this.meta })]);
     this.#bridge.notifySessionChanged(this);
+  }
+
+  /** Host-injected session MCP servers (pi-shape map) → pi-rs set_mcp_servers. */
+  async applyMcpServers(servers) {
+    this.#mcpServers = servers ?? null;
+    if (!this.#mcpServers || this.#disposed || !this.#rpc || this.#rpc.closed) return;
+    try {
+      await this.#rpc.request("set_mcp_servers", { servers: this.#mcpServers });
+    } catch (error) {
+      // Non-fatal: the session still works with file-configured MCP servers.
+      this.#bridge.log(`[tack-agent] set_mcp_servers failed: ${error.message}`);
+    }
   }
 
   async applyModelSelection(selection, thought, { persistMarker = true } = {}) {

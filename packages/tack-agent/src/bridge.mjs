@@ -23,6 +23,7 @@ import { encodeTopicWireFrames } from "./wire.mjs";
 import { AttachmentError, AttachmentStore } from "./attachments.mjs";
 import { agentDir } from "./piHome.mjs";
 import { loadSkills } from "./skills.mjs";
+import { McpProbePool, protocolMcpServersToPi } from "./mcp.mjs";
 
 const piProviders = JSON.parse(
   fs.readFileSync(
@@ -174,6 +175,8 @@ export class WorkspaceBridge {
   #attachments;
   #childParentMap = new Map(); // childSessionId -> parentSessionId
   #skillsCache = null; // {at, entries} (30s TTL)
+  #sessionMcpServers = new Map(); // sessionId -> pi-shape servers map (host createSession.mcpServers)
+  #mcpProbePool = null; // lazy McpProbePool for mcp/list
 
   constructor({ send, cwd, env, log }) {
     this.#send = send;
@@ -196,6 +199,17 @@ export class WorkspaceBridge {
     return entries;
   }
 
+  #mcpProbes() {
+    if (!this.#mcpProbePool) {
+      this.#mcpProbePool = new McpProbePool({
+        piBinary: this.piBinary,
+        env: this.piSpawnEnv(),
+        log: (line) => this.#log(line),
+      });
+    }
+    return this.#mcpProbePool;
+  }
+
   registerChildSession(parentSessionId, childSessionId) {
     this.#childParentMap.set(childSessionId, parentSessionId);
   }
@@ -203,6 +217,10 @@ export class WorkspaceBridge {
   #rebindActorToForkedSession(actor, newSessionId) {
     const oldSessionId = actor.sessionId;
     this.#actors.delete(oldSessionId);
+    // fork 出来的新会话继承同一 pi-rs 进程（MCP 规格仍在进程内），但 bridge
+    // 侧的留档要换键，否则 fork 后的冷恢复会丢 MCP 重放。
+    const mcpServers = this.#sessionMcpServers.get(oldSessionId);
+    if (mcpServers) this.#sessionMcpServers.set(newSessionId, mcpServers);
     for (const subscriptionId of [...actor.subscriptionIds()]) {
       this.#dropSubscription(subscriptionId);
     }
@@ -666,7 +684,11 @@ export class WorkspaceBridge {
       throw new ProtocolError(ERROR_INVALID_PARAMS, `unknown session: ${sessionId}`);
     }
     const task = SessionActor.resume({ bridge: this, workspace, sessionId, file })
-      .then((actor) => {
+      .then(async (actor) => {
+        // 冷恢复（resubscribe / 超时重建）也要恢复会话的 MCP 工具面：host
+        // 只在 createSession 时下发一次，bridge 按 sessionId 留存并在 resume 时重放。
+        const mcpServers = this.#sessionMcpServers.get(actor.sessionId);
+        if (mcpServers) await actor.applyMcpServers(mcpServers);
         this.#actors.set(actor.sessionId, actor);
         this.#pendingActors.delete(sessionId);
         return actor;
@@ -773,7 +795,7 @@ export class WorkspaceBridge {
         return {};
       }
       case "mcp/list":
-        return { statuses: {} };
+        return this.#handleMcpList(params ?? {});
       case "skills/referenceCatalog": {
         const entries = this.#skills().map((skill) => ({
           id: skill.name,
@@ -811,6 +833,24 @@ export class WorkspaceBridge {
   handleNotification(method) {
     // v4/connection/flow backpressure hints and telemetry frames require no action.
     void method;
+  }
+
+  /**
+   * mcp/list（设置页状态检查）：host 把 UI 归并后的 enabled MCP 全量下发，bridge
+   * 经共享 probe pi-rs 进程真实连接并回写 per-server 状态快照。mode=status 是
+   * OAuth 轮询的只读路径（不触发连接/断开）。
+   */
+  async #handleMcpList(params) {
+    const servers = protocolMcpServersToPi(params.mcpServers);
+    const connect = (params.mode ?? "connect") !== "status";
+    const workspacePath = params.workspace?.workspacePath ?? this.#cwd;
+    try {
+      const statuses = await this.#mcpProbes().status({ workspacePath, servers, connect });
+      return { statuses };
+    } catch (error) {
+      this.#log(`[tack-agent] mcp/list failed: ${error.message}`);
+      throw new ProtocolError(ERROR_INTERNAL, `mcp/list failed: ${error.message}`);
+    }
   }
 
   async #handleSubscribe(params) {
@@ -903,12 +943,17 @@ export class WorkspaceBridge {
             workspacePath: this.#cwd,
             workspaceKey: workspaceId,
           };
+          // MCP 是 runtime 启动期配置（ZCode 协议注释）：必须随 create 一次性
+          // 进入会话，首发 prompt 之前注入 pi-rs。
+          const mcpServers = protocolMcpServersToPi(payload.mcpServers);
           const actor = await SessionActor.spawnNew({
             bridge: this,
             workspace,
             config: payload.config ?? {},
+            mcpServers,
           });
           this.#actors.set(actor.sessionId, actor);
+          if (mcpServers) this.#sessionMcpServers.set(actor.sessionId, mcpServers);
           this.notifySessionChanged(actor);
           let input;
           if (payload.firstInput?.text) {
@@ -1053,6 +1098,7 @@ export class WorkspaceBridge {
             await actor.dispose();
             this.#actors.delete(sessionId);
           }
+          this.#sessionMcpServers.delete(sessionId);
           deleteSessionFile(this.#cwd, sessionId, this.#env);
           this.#notifySessionRemoved(workspaceId, sessionId);
           return this.#recordAck(sessionId, {
@@ -1332,6 +1378,9 @@ export class WorkspaceBridge {
       pending.reject(new Error("bridge disposed"));
     }
     this.#reversePending.clear();
+    this.#mcpProbePool?.dispose();
+    this.#mcpProbePool = null;
+    this.#sessionMcpServers.clear();
     await Promise.all([...this.#actors.values()].map((actor) => actor.dispose()));
   }
 }
