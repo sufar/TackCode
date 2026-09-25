@@ -487,13 +487,23 @@ export class WorkspaceBridge {
 
   // ── actors ──────────────────────────────────────────────────────────────
 
-  async #ensureActor(sessionId, workspaceId) {
+  async #ensureActor(sessionId, workspaceRef) {
     const existing = this.#actors.get(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      // Late-arriving workspace identity (first seen via subscribe params)
+      // still upgrades the actor's ref so legacy snapshots group correctly.
+      if (workspaceRef?.workspaceIdentity && !existing.workspace.workspaceIdentity) {
+        existing.workspace.workspaceIdentity = workspaceRef.workspaceIdentity;
+      }
+      return existing;
+    }
     if (this.#pendingActors.has(sessionId)) return this.#pendingActors.get(sessionId);
     const workspace = {
       workspacePath: this.#cwd,
-      workspaceKey: workspaceId ?? this.#cwd,
+      workspaceKey: workspaceRef?.workspaceKey ?? workspaceRef ?? this.#cwd,
+      ...(workspaceRef?.workspaceIdentity
+        ? { workspaceIdentity: workspaceRef.workspaceIdentity }
+        : {}),
     };
     const file = findSessionFile(this.#cwd, sessionId, this.#env);
     if (!file) {
@@ -612,8 +622,10 @@ export class WorkspaceBridge {
     const connectionId = params.connectionId ?? "default";
     if (topic.startsWith("conversation/")) {
       const sessionId = topic.slice("conversation/".length);
-      const workspaceId = params.workspace?.workspaceKey ?? this.#cwd;
-      const actor = await this.#ensureActor(sessionId, workspaceId);
+      const actor = await this.#ensureActor(sessionId, {
+        workspaceKey: params.workspace?.workspaceKey ?? this.#cwd,
+        workspaceIdentity: params.workspace?.workspaceIdentity,
+      });
       const subscriptionId = this.#registerSubscription(topic, connectionId, "conversation");
       actor.attach(subscriptionId, connectionId);
       const { frame } = actor.snapshot(subscriptionId);

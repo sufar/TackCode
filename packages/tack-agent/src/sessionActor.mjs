@@ -498,6 +498,9 @@ export class SessionActor {
         sessionId: this.sessionId,
         workspace: {
           workspacePath: this.#workspace.workspacePath,
+          ...(this.#workspace.workspaceIdentity
+            ? { workspaceIdentity: this.#workspace.workspaceIdentity }
+            : {}),
           workspaceKey: this.#workspace.workspaceKey,
         },
         sessionKind: "interactive",
