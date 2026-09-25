@@ -74,7 +74,12 @@ Electron userData、`PI_RS_AGENT_DIR`（pi-rs 的会话/凭据目录），并通
 
 ## 模型与凭据
 
-两条路，可混用：
+**自动播种**：启动时 TackCode 会执行 `pi-rs models`，把带 ✓ 标记（已有凭据）的
+provider 以 `pi-rs · <名称>` 为名播种进模型注册表（幂等，只加不覆盖；见
+`desktop/src/host/tackPiProviderSeed.ts`）。首次启动后打开模型选择器就能直接选。
+模型 id 与 pi-rs 目录一致，思考档位、上下文窗口由模板/规则兜底。
+
+另有两条手动路，可混用：
 
 1. **pi-rs 自有凭据**（推荐）：`pi-rs login --provider X` 或环境变量
    （`ANTHROPIC_API_KEY` 等，见 `pi-rs providers`）。bridge 启动时解析

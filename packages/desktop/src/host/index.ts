@@ -2904,6 +2904,12 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           services.register(IZCodeTaskService, reportingZCodeTaskService);
         }
         wireLocalResourceTelemetry(services);
+        // TackCode: pi-rs 已就绪的 provider 播种进模型注册表（幂等、失败静默）。
+        void import("./tackPiProviderSeed.js").then(({ seedTackPiProviders }) =>
+          seedTackPiProviders(services, logger).catch((error) =>
+            logger.warn("[tack-seed] failed", error),
+          ),
+        );
         hasDisposedHostResources = false;
         disposeHostResourcesInFlight = null;
         const agentWarmupTargets =

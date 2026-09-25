@@ -95,6 +95,24 @@ export class WorkspaceBridge {
     const direct = PI_PROVIDER_ALIASES[providerId];
     if (direct) return direct;
     if (piProviders.some((p) => p.id === providerId)) return providerId;
+    // Personal providers created from a template get "<templateId>-N" ids.
+    const suffixMatch = /^(.*?)-\d+$/.exec(providerId);
+    if (suffixMatch) {
+      const base = suffixMatch[1];
+      if (PI_PROVIDER_ALIASES[base]) return PI_PROVIDER_ALIASES[base];
+      if (piProviders.some((p) => p.id === base)) return base;
+    }
+    // Custom personal providers: resolve via the account config's baseUrl.
+    const api = this.#accountConfig?.providers?.[providerId]?.api;
+    if (api?.baseUrl) {
+      try {
+        const host = new URL(api.baseUrl).host;
+        const match = piProviders.find((p) => p.baseUrl && new URL(p.baseUrl).host === host);
+        if (match) return match.id;
+      } catch {
+        /* malformed baseUrl */
+      }
+    }
     return providerId;
   }
 
