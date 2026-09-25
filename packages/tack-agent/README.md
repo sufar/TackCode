@@ -69,6 +69,10 @@ ZCode
   toolcall_* → toolCall 行（inputText 流式）；tool_execution_* → 行状态/输出；
   turn_end → turnHeader 终态；message_update error → control.lastError
 - 模型目录：`pi-rs models` 解析出有凭据 provider 的模型，经 workspace-config 发布
+- 技能（skills）：bridge `skills/referenceCatalog` 返回 pi 生态目录（.pi/skills、
+  .agents/skills、<agentDir>/skills），entry id 必须是 `glm:<scope>:<path>`——UI
+  skillSourceFilter 只放行 glm: 前缀/.zcode 路径/plugin 域；设置→技能页是 host 侧
+  扫描（packages/services skillsService），已补丁加入 pi 根 + 根目录裸 .md 支持
 - 会话列表：扫描 `<agentDir>/sessions/--<cwd>--/*.jsonl`（标题 = 自定义名或首条用户消息）
 
 ## 测试
