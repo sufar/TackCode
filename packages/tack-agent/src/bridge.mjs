@@ -25,10 +25,14 @@ import { AttachmentError, AttachmentStore } from "./attachments.mjs";
 import { agentDir } from "./piHome.mjs";
 import { loadSkills } from "./skills.mjs";
 import { McpProbePool, SessionMcpStore, loadFileMcpServers, protocolMcpServersToPi } from "./mcp.mjs";
+import { grantWorkspaceHookTrustFlow, revokeWorkspaceHookTrustFlow } from "./hooks.mjs";
+
+const AGENT_VERSION = JSON.parse(
+  fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 
 const piProviders = JSON.parse(
-  fs.readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), "piProviders.generated.json"),
+  fs.readFileSync(    path.join(path.dirname(fileURLToPath(import.meta.url)), "piProviders.generated.json"),
     "utf8",
   ),
 );
@@ -293,6 +297,11 @@ export class WorkspaceBridge {
 
   log(message) {
     this.#log(message);
+  }
+
+  /** hooks 发现/信任存储都以宿主 HOME 为根（与 services 层同 HOME 才能读到同一 store）。 */
+  get homeDir() {
+    return this.#env.HOME ?? this.#env.USERPROFILE;
   }
 
   // ── workspace / catalog helpers ─────────────────────────────────────────
@@ -800,7 +809,7 @@ export class WorkspaceBridge {
           enabled: params?.enabled === true,
         };
       case "workspace/hooks/trustGrant":
-        return { accepted: true };
+        return this.#handleHookTrustGrant(params ?? {});
       case "provider/testModelConnectivity":
         return { success: true };
       case "session/setModel":
@@ -860,6 +869,46 @@ export class WorkspaceBridge {
    * 经共享 probe pi-rs 进程真实连接并回写 per-server 状态快照。mode=status 是
    * OAuth 轮询的只读路径（不触发连接/断开）。
    */
+  /**
+   * workspace/hooks/trustGrant（Settings 页无会话预信任）：bridge 作为 Agent
+   * authority 重新发现 canonical snapshot、校验 bundle/declaration digest 后
+   * 写信任存储（UI 只提交 digest，记录字段全部由 bridge 重算）。落盘后
+   * 该 workspace 的 live 会话立即重跑 provision（pi-rs 下一轮 prompt 生效）。
+   */
+  async #handleHookTrustGrant(params) {
+    const workspacePath = params?.workspace?.workspacePath ?? this.#cwd;
+    try {
+      const result = await grantWorkspaceHookTrustFlow({
+        workspacePath,
+        workspaceIdentity: params?.workspace?.workspaceIdentity,
+        bundleDigest: params?.bundleDigest,
+        hookDeclarationDigest: params?.hookDeclarationDigest,
+        homeDir: this.homeDir,
+        appVersion: AGENT_VERSION,
+        log: (line) => this.#log(line),
+      });
+      if (result.accepted) {
+        this.#reprovisionWorkspaceHooks(result.workspaceIdentity ?? workspacePath);
+        return { accepted: true };
+      }
+      return { accepted: false, reasonCode: result.reasonCode };
+    } catch (error) {
+      this.#log(`[tack-agent] trustGrant failed: ${error.message}`);
+      return { accepted: false, reasonCode: "workspace_hooks_config_unreadable" };
+    }
+  }
+
+  /** 信任变化后重跑同 workspace 全部 live 会话的 hook provision。 */
+  #reprovisionWorkspaceHooks(workspacePath) {
+    const target = path.resolve(workspacePath);
+    for (const actor of this.#actors.values()) {
+      if (path.resolve(actor.workspace.workspacePath) !== target) continue;
+      actor
+        .provisionHooks()
+        .catch((error) => this.#log(`[tack-agent] reprovision hooks failed: ${error.message}`));
+    }
+  }
+
   async #handleMcpList(params) {
     const workspacePath = params.workspace?.workspacePath ?? this.#cwd;
     // host 显式下发优先；缺省回落 zcode 配置文件解析（zcode-cli mcp/list 的
@@ -1220,6 +1269,40 @@ export class WorkspaceBridge {
           actor
             .cancelBackgroundWork(payload.workId ?? "")
             .catch((error) => this.#log(`[tack-agent] cancelBackgroundWork failed: ${error.message}`));
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: actor.revision,
+          });
+        }
+        case "requestWorkspaceHookReview": {
+          // 软门禁 fire-and-forget：banner 点击已自行打开设置页 Hooks 分区，
+          // 完整 review interaction（workspaceHookReview payload）未实现，
+          // 这里只需让命令通道不报错。
+          return this.#recordAck(sessionId, {
+            commandId,
+            status: "accepted",
+            revisionAtDecision: 0,
+          });
+        }
+        case "revokeWorkspaceHookTrust": {
+          const actor = await this.#ensureActor(sessionId, workspaceId);
+          const result = await revokeWorkspaceHookTrustFlow({
+            workspacePath: actor.workspace.workspacePath,
+            workspaceIdentity: payload.workspaceIdentity,
+            hookDeclarationDigests: payload.hookDeclarationDigests,
+            homeDir: this.homeDir,
+          });
+          if (!result.accepted) {
+            return this.#recordAck(sessionId, {
+              commandId,
+              status: "failed",
+              reasonCode: result.reasonCode,
+              revisionAtDecision: actor.revision,
+            });
+          }
+          // 撤销即刻生效：重跑 provision，下一轮 prompt 不再下发。
+          await actor.provisionHooks();
           return this.#recordAck(sessionId, {
             commandId,
             status: "accepted",

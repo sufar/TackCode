@@ -4,6 +4,7 @@
 // control/config/usage state, and the pi-rs event -> v4 delta state machine.
 import { randomUUID } from "node:crypto";
 import { spawnPiRpc } from "./piRpc.mjs";
+import { provisionWorkspaceHooks } from "./hooks.mjs";
 import {
   RowFactory,
   contentBlocksText as textOf,
@@ -227,6 +228,7 @@ export class SessionActor {
   #backgroundWorks = []; // backgroundWorkSummarySchema[]
   #queueItems = []; // queued follow_up intents (conversationInputIntentSchema[])
   #mcpServers = null; // pi-shape servers map injected at session create (host mcpServers)
+  #hookAdmission = null; // snapshot.workspaceHookAdmission（软门禁投影）
   #admissionSeq = 0;
   #autoDrain = true;
 
@@ -251,6 +253,8 @@ export class SessionActor {
     // MCP 是 runtime 启动期配置：必须在首个 prompt 之前注入（fingerprint
     // 变化会让 pi-rs 在建池时连同这批 server 一起连接）。
     if (mcpServers) await actor.applyMcpServers(mcpServers);
+    // hooks 同理：信任过滤后的集合要在首个 prompt（SessionStart 懒触发）前下发。
+    await actor.provisionHooks();
     if (config?.provider && config?.model) {
       await actor.applyModelSelection(
         { providerId: config.provider, modelId: config.model },
@@ -275,6 +279,7 @@ export class SessionActor {
     const meta = file ? readSessionFileMeta(file) : null;
     await actor.#readState();
     await actor.#rebuildFromHistory(meta);
+    await actor.provisionHooks();
     return actor;
   }
 
@@ -609,7 +614,7 @@ export class SessionActor {
             subagents: this.#subagentsProjection(),
             goal: null,
             plan: null,
-            workspaceHookAdmission: null,
+            workspaceHookAdmission: this.#hookAdmission,
             rows: {
               window,
               totalCount: this.rows.length,
@@ -1162,6 +1167,40 @@ export class SessionActor {
     }
   }
 
+  /**
+   * ZCode workspace hooks → pi-rs set_hooks：bridge 侧完成发现 + 信任裁决
+   * （pi-rs fail-open、无信任概念），只下发「已信任 + configuredEnabled」的
+   * 项目 hook 与用户 zcode hook；未信任项投影为 snapshot.workspaceHookAdmission
+   * （软门禁 banner）。信任落盘后（trustGrant/revoke）对本方法重跑即可在
+   * 下一轮 prompt 生效（pi-rs 每轮重建 hook 配置）。
+   */
+  async provisionHooks() {
+    if (this.#disposed || !this.#rpc || this.#rpc.closed) return;
+    try {
+      const result = await provisionWorkspaceHooks({
+        workspacePath: this.#workspace.workspacePath,
+        workspaceIdentity: this.#workspace.workspaceIdentity,
+        homeDir: this.#bridge.homeDir,
+        log: (line) => this.#bridge.log(line),
+      });
+      await this.#rpc.request("set_hooks", { hooks: result.piHooks });
+      this.#hookAdmission = result.bundleDigest
+        ? {
+            pendingCount: result.pendingCount,
+            bundleDigest: result.bundleDigest,
+            workspaceIdentity: result.workspaceIdentity,
+          }
+        : null;
+      if (result.trustStoreCorrupt) {
+        this.#bridge.log("[tack-agent] workspace hook trust store corrupt: all blocked");
+      }
+      this.#emit([this.#statePatch({ workspaceHookAdmission: this.#hookAdmission })]);
+    } catch (error) {
+      // hooks 是增量能力，失败不得拖垮会话。
+      this.#bridge.log(`[tack-agent] provisionHooks failed: ${error.message}`);
+    }
+  }
+
   async applyModelSelection(selection, thought, { persistMarker = true } = {}) {
     const provider = this.#bridge.toPiProviderId(selection.providerId);
     const model = selection.modelId;
@@ -1363,6 +1402,9 @@ export class SessionActor {
         break;
       case "background_task":
         this.#handleBackgroundTaskEvent(event);
+        break;
+      case "hook_notice":
+        this.#handleHookNotice(event);
         break;
       default:
         break;
@@ -1870,6 +1912,28 @@ export class SessionActor {
     work.endedAt = Date.now();
     work.cancellable = false;
     this.#emit([this.#statePatch({ backgroundWorks: this.#backgroundWorks })]);
+  }
+
+  /**
+   * pi hook_notice → 用户可见行。被拦截的 prompt 不会有任何 agent 活动，
+   * 这行是用户唯一能看到的解释；HookInvocationRow 完整投影需要 pi-rs 引擎
+   * 生命周期事件（hookRunId/descriptor），留作后续跟进。
+   */
+  #handleHookNotice(event) {
+    const message = typeof event.message === "string" ? event.message.trim() : "";
+    if (!message) return;
+    const at = Date.now();
+    const hookEvent = typeof event.hookEvent === "string" ? event.hookEvent : "Hook";
+    const prefix = event.kind === "block" ? `⛔ ${hookEvent} hook 拦截：` : `🔔 ${hookEvent} hook：`;
+    const row = this.#rowFactory.assistantText({
+      turnId: this.#turnId ?? "turn-0",
+      at,
+      seq: this.seq + 1,
+      state: "complete",
+      text: `${prefix}${message}`,
+    });
+    this.#pushRow(row);
+    this.#emit([{ op: "row.appended", row }]);
   }
 
   async cancelBackgroundWork(workId) {

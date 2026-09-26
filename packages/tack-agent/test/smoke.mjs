@@ -29,12 +29,34 @@ const frames = [];
 const bridgeHome =
   process.env.TACK_SMOKE_HOME ?? fs.mkdtempSync(path.join(os.tmpdir(), "tack-smoke-home-"));
 const smokeAgentDir = process.env.PI_RS_AGENT_DIR ?? path.join(bridgeHome, ".pi-rs", "agent");
+// 会话 workspace 也隔进临时目录：hooks 发现（.zcode/config.json）与 session 文件
+// 都落在里面，不污染仓库。可用 TACK_SMOKE_WS 固定位置调试。
+const smokeWs = fs.realpathSync(
+  process.env.TACK_SMOKE_WS ?? fs.mkdtempSync(path.join(os.tmpdir(), "tack-smoke-ws-")),
+);
+fs.mkdirSync(path.join(smokeWs, ".git"), { recursive: true });
+// hooks fixture（在 createSession 之前就位——provision 发生在会话 spawn 时）：
+// 未信任的 UserPromptSubmit 拦截 hook，用于验证「信任前不下发 / 信任后真执行」。
+fs.mkdirSync(path.join(smokeWs, ".zcode"), { recursive: true });
+fs.writeFileSync(
+  path.join(smokeWs, ".zcode", "config.json"),
+  JSON.stringify({
+    hooks: {
+      enabled: true,
+      events: {
+        UserPromptSubmit: [
+          { hooks: [{ type: "command", command: "echo SMOKE-HOOK-BLOCK 1>&2; exit 2" }] },
+        ],
+      },
+    },
+  }),
+);
 
 let child;
 function startBridge() {
   buffer = "";
   child = spawn(process.execPath, [bridgeBin], {
-    cwd: process.cwd(),
+    cwd: smokeWs,
     env: {
       ...process.env,
       HOME: bridgeHome,
@@ -101,9 +123,9 @@ function assert(condition, message) {
 
 // 1. readPresentation
 const presentation = await request("workspace/readPresentation", {
-  workspace: { workspacePath: process.cwd(), workspaceKey: "smoke" },
+  workspace: { workspacePath: smokeWs, workspaceKey: "smoke" },
 });
-assert(presentation.result?.workspace?.workspacePath === process.cwd(), "readPresentation");
+assert(presentation.result?.workspace?.workspacePath === smokeWs, "readPresentation");
 
 // 2. provider/updateAccountConfig (host pushes this before everything else)
 const account = await request("provider/updateAccountConfig", {
@@ -237,6 +259,99 @@ if (promptArg) {
     expected = f.toSeq;
   }
 }
+
+// 7.5 workspace hooks：发现 → admission 投影 → 信任前不下发 → trustGrant 落盘 → 重下发 → 真拦截
+const hookConvSnapshot = frames.find(
+  (f) => f.topic === `conversation/${sessionId}` && f.payload.kind === "snapshot",
+);
+const admission = hookConvSnapshot.payload.snapshot.workspaceHookAdmission;
+assert(
+  admission && admission.pendingCount === 1,
+  `workspaceHookAdmission pendingCount == 1 (${JSON.stringify(admission)})`,
+);
+assert(/^[a-f0-9]{64}$/.test(admission.bundleDigest), "admission bundleDigest is sha256");
+
+// 信任前：hook 不下发 → prompt 不被拦截（provider 错误收尾也不出现 hook 拦截行）。
+const framesBeforeUntrusted = frames.length;
+const untrustedSend = await request("v4/command", {
+  commandId: crypto.randomUUID(),
+  clientId: "smoke-client",
+  sessionId,
+  type: "sendText",
+  payload: { text: "untrusted-hook probe" },
+  issuedAt: Date.now(),
+});
+assert(untrustedSend.result?.status === "accepted", "sendText (untrusted hook) accepted");
+await sleep(3_000);
+const untrustedRows = frames
+  .slice(framesBeforeUntrusted)
+  .flatMap((f) => (f.payload.kind === "deltas" ? f.payload.deltas : []))
+  .map((d) => d.row)
+  .filter(Boolean);
+assert(
+  !untrustedRows.some(
+    (row) => typeof row.text === "string" && row.text.includes("SMOKE-HOOK-BLOCK"),
+  ),
+  "untrusted hook did NOT block the prompt",
+);
+
+// trustGrant：与 UI 同路径计算 declaration digest（bridge 侧重新发现校验后落盘）。
+const { readProjectHookSources, buildBundleSnapshot } = await import("../src/hooks.mjs");
+const grantSnapshot = buildBundleSnapshot({
+  workspaceIdentity: smokeWs,
+  workspacePath: smokeWs,
+  sources: readProjectHookSources({ workingDirectory: smokeWs }).sources,
+  runtimeRoot: { enabled: true, timeoutMs: 60_000, maxOutputBytes: 32_768 },
+});
+assert(
+  grantSnapshot.bundleDigest === admission.bundleDigest,
+  `grant bundle digest matches admission (${grantSnapshot.bundleDigest} == ${admission.bundleDigest})`,
+);
+const grant = await request("workspace/hooks/trustGrant", {
+  workspace: { workspacePath: smokeWs, workspaceKey: "smoke" },
+  bundleDigest: admission.bundleDigest,
+  hookDeclarationDigest: grantSnapshot.hooks[0].hookDeclarationDigest,
+});
+assert(grant.result?.accepted === true, `trustGrant accepted (${JSON.stringify(grant.result)})`);
+assert(
+  fs.existsSync(path.join(bridgeHome, ".zcode", "security", "workspace-hook-trust-v1.json")),
+  "trust store written under bridge HOME",
+);
+
+// 重下发：admission 清零；信任过的 hook 真拦截（hook_notice 行）。
+await sleep(1_500);
+const reprojected = frames.some(
+  (f) =>
+    f.topic === `conversation/${sessionId}` &&
+    f.payload.kind === "deltas" &&
+    f.payload.deltas.some(
+      (d) => d.op === "state.updated" && d.patch.workspaceHookAdmission?.pendingCount === 0,
+    ),
+);
+assert(reprojected, "admission re-projected to pendingCount == 0 after trustGrant");
+
+const framesBeforeTrusted = frames.length;
+const trustedSend = await request("v4/command", {
+  commandId: crypto.randomUUID(),
+  clientId: "smoke-client",
+  sessionId,
+  type: "sendText",
+  payload: { text: "trusted-hook probe" },
+  issuedAt: Date.now(),
+});
+assert(trustedSend.result?.status === "accepted", "sendText (trusted hook) accepted");
+const blockDeadline = Date.now() + 30_000;
+let blockedRow = null;
+while (Date.now() < blockDeadline && !blockedRow) {
+  await sleep(300);
+  blockedRow = frames
+    .slice(framesBeforeTrusted)
+    .flatMap((f) => (f.payload.kind === "deltas" ? f.payload.deltas : []))
+    .map((d) => d.row)
+    .filter(Boolean)
+    .find((row) => typeof row.text === "string" && row.text.includes("SMOKE-HOOK-BLOCK"));
+}
+assert(blockedRow, "trusted hook blocked the prompt (hook_notice row projected)");
 
 // 8. mcp/list（设置页状态检查）：真实 stdio MCP server → connected + toolCount
 const mockServerPath = path.join(here, "mockMcpServer.mjs");
