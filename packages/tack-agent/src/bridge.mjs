@@ -1276,12 +1276,14 @@ export class WorkspaceBridge {
           });
         }
         case "requestWorkspaceHookReview": {
-          // 软门禁 fire-and-forget：banner 点击已自行打开设置页 Hooks 分区，
-          // 完整 review interaction（workspaceHookReview payload）未实现，
-          // 这里只需让命令通道不报错。
+          // bridge 不承载完整 review interaction（workspaceHookReview payload）。
+          // 按上游回退契约拒绝：UI 的 trustWorkspaceHookWithReview 命中
+          // shouldGrantCurrentWorkspaceSnapshot → 转 workspace trustGrant 预信任
+          // （banner 的去审核按钮是 fire-and-forget，拒绝只记 warn 不影响导航）。
           return this.#recordAck(sessionId, {
             commandId,
-            status: "accepted",
+            status: "rejected",
+            reasonCode: "workspace_hooks_require_trust_capable_host",
             revisionAtDecision: 0,
           });
         }

@@ -1184,6 +1184,9 @@ export class SessionActor {
         log: (line) => this.#bridge.log(line),
       });
       await this.#rpc.request("set_hooks", { hooks: result.piHooks });
+      this.#bridge.log(
+        `[tack-agent] provisionHooks: discovered=${result.discoveredCount} active=${result.activeCount} pending=${result.pendingCount} events=${Object.keys(result.piHooks).join(",") || "-"}`,
+      );
       this.#hookAdmission = result.bundleDigest
         ? {
             pendingCount: result.pendingCount,

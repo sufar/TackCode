@@ -52,4 +52,9 @@ export ZCODE_DESKTOP_SESSION_DATA_DIR="$HOME/electron-user-data/session"
 
 cd "$REPO_ROOT"
 corepack pnpm --filter @zcode/desktop pre-dev
+# 工作区参数经 Electron argv 注入（dev.mjs 不转发自身 argv；
+# ZCODE_DEV_ELECTRON_EXTRA_ARGS_JSON 是现成的 dev-only 通道）。
+if [ "${1:-}" ]; then
+  export ZCODE_DEV_ELECTRON_EXTRA_ARGS_JSON="${ZCODE_DEV_ELECTRON_EXTRA_ARGS_JSON:-["--open-workspace","$1"]}"
+fi
 exec corepack pnpm --filter @zcode/desktop dev:runtime
